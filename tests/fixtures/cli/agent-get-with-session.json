@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "agent",
+    "get",
+    "w3:p1"
+  ],
+  "captured_at": "2026-09-18T22:19:21",
+  "herdr_version": "herdr 0.9.0",
+  "exit_code": 0,
+  "stdout": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"00000000-0000-4000-8000-000000000002\"},\"agent_status\":\"blocked\",\"cwd\":\"/Users/dev/Developer/herdr-nudge\",\"focused\":true,\"foreground_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"pane_id\":\"w3:p1\",\"revision\":17,\"state_change_seq\":203,\"tab_id\":\"w3:t1\",\"terminal_id\":\"term_65bceb9e23266a\",\"terminal_title\":\"◐ M0 setup and fixture categorization\",\"terminal_title_stripped\":\"M0 setup and fixture categorization\",\"workspace_id\":\"w3\"},\"type\":\"agent_info\"}}\n",
+  "stderr": ""
+}

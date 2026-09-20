@@ -1,0 +1,23 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-18-gaps.log:2",
+  "captured_at": "22:32:14",
+  "provenance": "programmatic",
+  "mark": "session start: M0 gap captures (Claude in w3:p1, user focused there)",
+  "why": "herdr tab create --no-focus",
+  "event": "tab.created",
+  "event_json": "{\"event\":\"tab_created\",\"data\":{\"type\":\"tab_created\",\"tab\":{\"tab_id\":\"w3:t2\",\"workspace_id\":\"w3\",\"number\":2,\"label\":\"capture\",\"focused\":false,\"pane_count\":1,\"agent_status\":\"unknown\"}}}",
+  "env": {
+    "HERDR_BIN_PATH": "/Users/dev/.local/bin/herdr",
+    "HERDR_ENV": "1",
+    "HERDR_PANE_ID": "w3:p3",
+    "HERDR_PLUGIN_CONFIG_DIR": "/Users/dev/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w3\",\"workspace_label\":\"herdr-nudge\",\"workspace_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"tab_id\":\"w3:t2\",\"tab_label\":\"capture\",\"focused_pane_id\":\"w3:p3\",\"focused_pane_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"focused_pane_status\":\"unknown\",\"invocation_source\":\"api\",\"correlation_id\":\"tab.created\"}",
+    "HERDR_PLUGIN_EVENT": "tab.created",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/Users/dev/Developer/herdr-nudge/tools/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/Users/dev/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/Users/dev/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w3:t2",
+    "HERDR_WORKSPACE_ID": "w3"
+  }
+}

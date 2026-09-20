@@ -1,0 +1,15 @@
+[package]
+name = "herdr-nudge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "macOS notifications for Herdr panes, click to focus the pane"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[lints.rust]
+unsafe_code = "forbid"
