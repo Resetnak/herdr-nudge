@@ -1,0 +1,183 @@
+//! Argument parsing. Every mode is either positional or a bare flag, so a
+//! parser crate isn't worth the dependency. Pure function over argv: it
+//! reads nothing else and never exits.
+
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    /// No arguments: Herdr invoked us as an event hook.
+    Event,
+    /// macOS relaunched the bundle because a notification was clicked, and
+    /// is running that notification's own command.
+    Click(JobId),
+    /// Herdr's startup hook.
+    Cleanup,
+    Doctor,
+    Bind(Bind),
+    Test {
+        shell: bool,
+    },
+    Help,
+    Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Bind {
+    List,
+    Set {
+        workspace_id: String,
+        bundle_id: String,
+    },
+}
+
+/// A job id: 16 lowercase hex characters.
+///
+/// Checking in the constructor means an unchecked id can't exist. The id
+/// comes back from macOS on a click and is used to name a file, and it's the
+/// only thing we ever put into the notifier's `-execute` string, so it has
+/// to be safe before anything uses it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct JobId(String);
+
+impl JobId {
+    pub fn parse(s: &str) -> Result<Self, ParseError> {
+        let ok = s.len() == 16 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        if ok {
+            Ok(JobId(s.to_owned()))
+        } else {
+            Err(ParseError::BadJobId(s.to_owned()))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for JobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseError {
+    UnknownArg(String),
+    BadJobId(String),
+    MissingValue(&'static str),
+    UnexpectedArg { mode: &'static str, arg: String },
+    Usage(&'static str),
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParseError::UnknownArg(a) => write!(f, "unknown argument: {a}"),
+            ParseError::BadJobId(a) => {
+                write!(f, "--click wants 16 lowercase hex characters, got: {a}")
+            }
+            ParseError::MissingValue(what) => write!(f, "missing value for {what}"),
+            ParseError::UnexpectedArg { mode, arg } => {
+                write!(f, "unexpected argument for {mode}: {arg}")
+            }
+            ParseError::Usage(what) => write!(f, "{what}"),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+pub const USAGE: &str = "\
+herdr-nudge — macOS notifications for Herdr panes
+
+  herdr-nudge                       event hook (invoked by Herdr)
+  herdr-nudge --click <16 hex>      focus the pane a notification was for
+  herdr-nudge --cleanup             startup hook
+  herdr-nudge doctor                diagnose config, bundle and bindings
+  herdr-nudge bind <ws> <bundle>    pin a workspace to a terminal
+  herdr-nudge bind --list           show the resolution table
+  herdr-nudge test [--shell]        post a real notification
+";
+
+/// `args` is argv without the program name.
+pub fn parse<I, S>(args: I) -> Result<Mode, ParseError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    let mut rest = args.iter().map(String::as_str);
+
+    let Some(first) = rest.next() else {
+        return Ok(Mode::Event);
+    };
+
+    match first {
+        "--click" => {
+            let value = rest.next().ok_or(ParseError::MissingValue("--click"))?;
+            let id = JobId::parse(value)?;
+            no_more(rest, "--click")?;
+            Ok(Mode::Click(id))
+        }
+        "--cleanup" => {
+            no_more(rest, "--cleanup")?;
+            Ok(Mode::Cleanup)
+        }
+        "doctor" => {
+            no_more(rest, "doctor")?;
+            Ok(Mode::Doctor)
+        }
+        "bind" => match rest.next() {
+            None => Err(ParseError::Usage(
+                "bind wants <workspace> <bundle-id>, or --list",
+            )),
+            Some("--list") => {
+                no_more(rest, "bind --list")?;
+                Ok(Mode::Bind(Bind::List))
+            }
+            // Without this a mistyped flag would be taken as a workspace
+            // name and written into the config.
+            Some(arg) if arg.starts_with('-') => Err(ParseError::UnknownArg(arg.to_owned())),
+            Some(workspace_id) => {
+                let bundle_id = rest.next().ok_or(ParseError::MissingValue("<bundle-id>"))?;
+                no_more(rest, "bind")?;
+                Ok(Mode::Bind(Bind::Set {
+                    workspace_id: workspace_id.to_owned(),
+                    bundle_id: bundle_id.to_owned(),
+                }))
+            }
+        },
+        "test" => {
+            let mut shell = false;
+            for arg in rest {
+                match arg {
+                    "--shell" => shell = true,
+                    other => {
+                        return Err(ParseError::UnexpectedArg {
+                            mode: "test",
+                            arg: other.to_owned(),
+                        });
+                    }
+                }
+            }
+            Ok(Mode::Test { shell })
+        }
+        "--help" | "-h" | "help" => Ok(Mode::Help),
+        "--version" | "-V" => Ok(Mode::Version),
+        other => Err(ParseError::UnknownArg(other.to_owned())),
+    }
+}
+
+fn no_more<'a>(
+    mut rest: impl Iterator<Item = &'a str>,
+    mode: &'static str,
+) -> Result<(), ParseError> {
+    match rest.next() {
+        None => Ok(()),
+        Some(arg) => Err(ParseError::UnexpectedArg {
+            mode,
+            arg: arg.to_owned(),
+        }),
+    }
+}
