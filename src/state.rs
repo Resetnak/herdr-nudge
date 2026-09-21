@@ -9,7 +9,8 @@
 //! Nothing is locked. The click process can run while an event hook does,
 //! so two writers to the same file means the last one wins.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -19,6 +20,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+use crate::classify::{Classification, ClassifySignal, PaneKind};
 
 /// Bumped when a file's shape changes. A file with any other version is
 /// moved aside like a corrupt one.
@@ -254,6 +257,101 @@ impl FocusOrigin {
     }
 }
 
+/// `agents-cache.json`: the agent labels Herdr detects by itself, from
+/// `server agent-manifests`.
+///
+/// Cached because it costs a subprocess and changes about as often as Herdr
+/// is upgraded. Refreshed at startup, not per event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentsCache {
+    pub version: u32,
+    pub fetched_at_ms: u64,
+    #[serde(default)]
+    pub agents: BTreeSet<String>,
+}
+
+impl Default for AgentsCache {
+    fn default() -> Self {
+        AgentsCache {
+            version: VERSION,
+            fetched_at_ms: 0,
+            agents: BTreeSet::new(),
+        }
+    }
+}
+
+impl Versioned for AgentsCache {
+    fn version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl AgentsCache {
+    pub fn new(agents: impl IntoIterator<Item = String>, now_ms: u64) -> AgentsCache {
+        AgentsCache {
+            version: VERSION,
+            fetched_at_ms: now_ms,
+            agents: agents.into_iter().collect(),
+        }
+    }
+
+    pub fn labels(&self) -> impl Iterator<Item = &str> {
+        self.agents.iter().map(String::as_str)
+    }
+}
+
+/// `panes/<pane id in hex>.json`: what we last decided about a pane.
+///
+/// Not a cache to save work — classifying is free once `pane get` has been
+/// asked. It is what we fall back on when that query fails, so one
+/// unanswered question doesn't turn an agent pane into a shell one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneRecord {
+    pub version: u32,
+    pub pane_id: String,
+    /// The agent label this answer was about. `None` for a pane with no
+    /// agent identity at all.
+    pub agent: Option<String>,
+    pub kind: PaneKind,
+    pub signal: ClassifySignal,
+    pub classified_at_ms: u64,
+}
+
+impl Versioned for PaneRecord {
+    fn version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl PaneRecord {
+    pub fn new(
+        pane_id: &str,
+        agent: Option<&str>,
+        classification: Classification,
+        now_ms: u64,
+    ) -> PaneRecord {
+        PaneRecord {
+            version: VERSION,
+            pane_id: pane_id.to_owned(),
+            agent: agent.map(str::to_owned),
+            kind: classification.kind,
+            signal: classification.signal,
+            classified_at_ms: now_ms,
+        }
+    }
+}
+
+/// Pane ids go into file names as hex. They look like `w3:p1` today, but
+/// they come from the server, and a `/` or a `..` in one would otherwise
+/// write outside `panes/`.
+pub fn hex_name(pane_id: &str) -> String {
+    let mut out = String::with_capacity(pane_id.len() * 2);
+    for byte in pane_id.as_bytes() {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 /// The state directory and the files in it.
 #[derive(Debug, Clone)]
 pub struct StateDir {
@@ -277,6 +375,18 @@ impl StateDir {
         self.root.join("shell.env")
     }
 
+    pub fn agents_cache_path(&self) -> PathBuf {
+        self.root.join("agents-cache.json")
+    }
+
+    pub fn panes_dir(&self) -> PathBuf {
+        self.root.join("panes")
+    }
+
+    pub fn pane_record_path(&self, pane_id: &str) -> PathBuf {
+        self.panes_dir().join(format!("{}.json", hex_name(pane_id)))
+    }
+
     pub fn terminal_memory(&self) -> io::Result<Loaded<TerminalMemory>> {
         read_json(&self.terminal_memory_path())
     }
@@ -291,5 +401,30 @@ impl StateDir {
 
     pub fn save_focus_origin(&self, origin: &FocusOrigin) -> io::Result<()> {
         write_json(&self.focus_origin_path(), origin)
+    }
+
+    pub fn agents_cache(&self) -> io::Result<Loaded<AgentsCache>> {
+        read_json(&self.agents_cache_path())
+    }
+
+    pub fn save_agents_cache(&self, cache: &AgentsCache) -> io::Result<()> {
+        write_json(&self.agents_cache_path(), cache)
+    }
+
+    pub fn pane_record(&self, pane_id: &str) -> io::Result<Loaded<PaneRecord>> {
+        read_json(&self.pane_record_path(pane_id))
+    }
+
+    pub fn save_pane_record(&self, record: &PaneRecord) -> io::Result<()> {
+        write_json(&self.pane_record_path(&record.pane_id), record)
+    }
+
+    /// For a pane that closed, or one whose agent identity changed.
+    pub fn forget_pane(&self, pane_id: &str) -> io::Result<()> {
+        match fs::remove_file(self.pane_record_path(pane_id)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }

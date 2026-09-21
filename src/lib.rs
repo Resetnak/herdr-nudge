@@ -3,9 +3,10 @@
 //! [`cli`] reads the arguments, [`event`] parses what Herdr sends, and
 //! [`context`] holds the workspace info and the paths we were given.
 //! [`config`] is the user's settings, [`state`] our own files, [`herdr`]
-//! every question we ask Herdr, and [`terminal`] which app to bring forward
-//! on a click.
+//! every question we ask Herdr, [`classify`] whether a pane is an agent or a
+//! shell command, and [`terminal`] which app to bring forward on a click.
 
+pub mod classify;
 pub mod cli;
 pub mod config;
 pub mod context;

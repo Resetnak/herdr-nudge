@@ -30,12 +30,24 @@ pub struct PaneInfo {
     pub focused: bool,
     #[serde(default)]
     pub agent: Option<String>,
-    /// Only set when an agent's own Herdr integration reported a session.
-    /// Detecting an agent from its screen never sets it.
+    /// Set when something bound a session to the pane: an agent's own Herdr
+    /// integration, or a reporter passing `report-agent
+    /// --agent-session-id`. Detecting an agent from its screen never sets
+    /// it, and no shell reporter we've captured binds one.
     #[serde(default)]
     pub agent_session: Option<serde_json::Value>,
     #[serde(default)]
     pub terminal_title_stripped: Option<String>,
+}
+
+impl PaneInfo {
+    /// One half of the agent-or-shell decision. Herdr 0.9.0 leaves the key
+    /// out rather than nulling it
+    /// (`tests/fixtures/cli/pane-get-reported-no-session.json`); serde reads
+    /// either as `None`.
+    pub fn has_agent_session(&self) -> bool {
+        self.agent_session.is_some()
+    }
 }
 
 #[derive(Debug)]

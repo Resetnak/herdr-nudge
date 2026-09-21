@@ -6,8 +6,10 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
+use herdr_nudge::classify::{Classification, ClassifySignal, PaneKind};
 use herdr_nudge::state::{
-    FOCUS_ORIGIN_TTL_MS, FocusOrigin, Loaded, StateDir, TerminalMemory, VERSION, write_atomic,
+    AgentsCache, FOCUS_ORIGIN_TTL_MS, FocusOrigin, Loaded, PaneRecord, StateDir, TerminalMemory,
+    VERSION, write_atomic,
 };
 use support::scratch_dir;
 
@@ -234,5 +236,75 @@ fn two_readers_of_one_corrupt_file_both_recover() {
         .collect();
     for thread in threads {
         thread.join().unwrap();
+    }
+}
+
+#[test]
+fn the_agents_cache_round_trips() {
+    let state = StateDir::new(scratch_dir("the_agents_cache_round_trips"));
+    let cache = AgentsCache::new(["claude", "codex"].map(String::from), 1_000);
+    state.save_agents_cache(&cache).unwrap();
+
+    match state.agents_cache().unwrap() {
+        Loaded::Found(read) => {
+            assert_eq!(read, cache);
+            assert_eq!(read.labels().collect::<Vec<_>>(), ["claude", "codex"]);
+        }
+        other => panic!("agents-cache.json: expected Found, got {other:?}"),
+    }
+}
+
+fn record(pane_id: &str, agent: &str, kind: PaneKind) -> PaneRecord {
+    PaneRecord::new(
+        pane_id,
+        Some(agent),
+        Classification {
+            kind,
+            signal: ClassifySignal::Catalogue,
+        },
+        1_000,
+    )
+}
+
+#[test]
+fn a_pane_record_round_trips_and_is_forgotten() {
+    let state = StateDir::new(scratch_dir("a_pane_record_round_trips_and_is_forgotten"));
+    let written = record("w3:p1", "claude", PaneKind::Agent);
+    state.save_pane_record(&written).unwrap();
+
+    match state.pane_record("w3:p1").unwrap() {
+        Loaded::Found(read) => assert_eq!(read, written),
+        other => panic!("panes/w3:p1: expected Found, got {other:?}"),
+    }
+    assert!(matches!(
+        state.pane_record("w3:p2").unwrap(),
+        Loaded::Missing
+    ));
+
+    state.forget_pane("w3:p1").unwrap();
+    assert!(matches!(
+        state.pane_record("w3:p1").unwrap(),
+        Loaded::Missing
+    ));
+    // Forgetting a pane twice is what a close after a release looks like.
+    state.forget_pane("w3:p1").unwrap();
+}
+
+#[test]
+fn a_pane_id_cannot_name_a_file_outside_the_panes_directory() {
+    let state = StateDir::new(scratch_dir(
+        "a_pane_id_cannot_name_a_file_outside_the_panes_directory",
+    ));
+    let escaping = "../../w3:p1";
+    state
+        .save_pane_record(&record(escaping, "claude", PaneKind::Agent))
+        .unwrap();
+
+    let path = state.pane_record_path(escaping);
+    assert_eq!(path.parent().unwrap(), state.panes_dir());
+    assert_eq!(leftovers(&state.panes_dir()).len(), 1);
+    match state.pane_record(escaping).unwrap() {
+        Loaded::Found(read) => assert_eq!(read.pane_id, escaping),
+        other => panic!("{}: expected Found, got {other:?}", path.display()),
     }
 }

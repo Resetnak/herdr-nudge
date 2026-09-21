@@ -45,8 +45,8 @@ stay valid.
 
 Deliberately **not** redacted, because they are fixture content the code is
 tested against: pane, tab and workspace ids, timestamps, and terminal titles
-naming this project's own work (FR-4.4 composes notification text from
-`title` and `terminal_title_stripped`).
+naming this project's own work (notification text is composed from `title`
+and `terminal_title_stripped`).
 
 **Check before committing a new capture:** `grep -ri "<your username>" tests/`
 should return nothing.
@@ -100,40 +100,42 @@ belong to the probe; tests should override them.
 
 | File | | Covers |
 |---|---|---|
-| `agent/blocked` | m | Claude `blocked`, user on that pane (FR-1.1) |
-| `agent/blocked-user-elsewhere` | m | Claude `blocked` 24 s after the user left the pane (FR-1.4) |
-| `agent/done` | m | unwatched completion (FR-1.1, FR-1.4) |
-| `agent/done-user-elsewhere` | m | `done` ~20 s after the user left the pane (FR-1.4) |
-| `agent/idle-watched-completion` | m | watched completion arrives as `idle` (FR-1.4) |
+| `agent/blocked` | m | Claude `blocked`, user on that pane |
+| `agent/blocked-user-elsewhere` | m | Claude `blocked` 24 s after the user left the pane |
+| `agent/done` | m | unwatched completion |
+| `agent/done-user-elsewhere` | m | `done` ~20 s after the user left the pane |
+| `agent/idle-watched-completion` | m | watched completion arrives as `idle` |
 | `agent/idle-first-after-claim` | m | first status after Claude claims a pane |
 | `agent/working` | m | never notifies |
-| `agent/status-unknown-no-agent-field` | m | after Claude `/exit`: `agent` missing (FR-8.4) |
+| `agent/status-unknown-no-agent-field` | m | after Claude `/exit`: `agent` missing |
 | `shell/idle-with-title-labels` | p | watched; `title`, `display_agent`, `state_labels` |
 | `shell/idle-without-working` | p | `idle` with no preceding `working` stays `idle` |
-| `shell/done-unwatched-failed` | p | reported `idle` arrives as `done`, `idle=failed` kept (FR-1.2, FR-1.3) |
+| `shell/done-unwatched-failed` | p | reported `idle` arrives as `done`, `idle=failed` kept |
 | `shell/done-unwatched-after-handover` | p | the same, with `idle=done` |
-| `shell/working-metadata-update` | p | metadata alone emits a status event (FR-1.5) |
+| `shell/working-metadata-update` | p | metadata alone emits a status event, so the same status arrives twice |
 | `shell/blocked-with-title-labels` | p | reporter sends `blocked` |
 | `shell/blocked-bare` | p | optional fields missing |
-| `shell/blocked-unfocused-pane` | p | pane isn't its tab's focused pane (FR-1.4) |
-| `shell/status-unknown-on-release` | p | `agent_status: "unknown"` (FR-8.4) |
+| `shell/blocked-unfocused-pane` | p | pane isn't its tab's focused pane |
+| `shell/status-unknown-on-release` | p | `agent_status: "unknown"` |
 | `detected/shell-claim` | p | no `released` field |
 | `detected/shell-release` | p | `released: true`, `final_status` |
-| `detected/agent-claim-after-shell-release` | m | shell → agent handover (FR-2.4, FR-6.4) |
-| `detected/agent-release-on-exit` | m | Claude `/exit`: `final_status: "idle"` (FR-6.4) |
-| `detected/shell-claim-after-agent-exit` | p | agent → shell handover (FR-6.4) |
-| `lifecycle/pane-closed` | m | agent pane closed with no release first (FR-6.2) |
+| `detected/agent-claim-after-shell-release` | m | shell → agent handover |
+| `detected/agent-release-on-exit` | m | Claude `/exit`: `final_status: "idle"` |
+| `detected/shell-claim-after-agent-exit` | p | agent → shell handover |
+| `lifecycle/pane-closed` | m | agent pane closed with no release first |
 | `lifecycle/pane-created` | ? | nested `pane` object |
 | `lifecycle/tab-created` | p | `tab create --no-focus` |
-| `focus/tab-focus-{tab,pane,workspace}-focused` | p | one `herdr tab focus` burst (FR-6.1) |
+| `focus/tab-focus-{tab,pane,workspace}-focused` | p | one `herdr tab focus` burst |
 | `focus/tab-focus-back-pane-focused` | p | the return burst, in a different order |
-| `focus/socket-pane-focus-{pane,tab,workspace}-focused` | p | socket `pane.focus`, the call FR-5.1 makes: also a burst of three, so FR-6.1's dismiss trigger fires |
-| `cli/agent-get-with-session` | m | `agent_session` present (OQ-7) |
-| `cli/agent-get-reported-no-session` | p | agent label, no `agent_session` (OQ-7) |
+| `focus/socket-pane-focus-{pane,tab,workspace}-focused` | p | socket `pane.focus`, the call a click makes: also a burst of three, so a click's own focus event can dismiss the notification |
+| `cli/agent-get-with-session` | m | `agent_session` present: an agent |
+| `cli/agent-get-reported-no-session` | p | agent label, no `agent_session`: a shell command |
 | `cli/agent-get-plain-shell` | – | `agent_not_found` on stderr, exit 1 |
-| `cli/agent-manifests` | – | the catalogue (FR-2.3) |
-| `cli/pane-get-focused` | – | `focused: true` for the pane the user is on (FR-1.4) |
+| `cli/agent-manifests` | – | the agent labels Herdr detects by itself |
+| `cli/pane-get-focused` | – | `focused: true` for the pane the user is on |
 | `cli/pane-get-unfocused` | – | `focused: false`, and it works on a plain shell pane |
+| `cli/pane-get-reported-no-session` | p | a pane claimed by `pane report-agent`: `agent`, `title` and `state_labels`, no `agent_session` |
+| `cli/pane-get-after-release` | p | the same pane after `release-agent`: no `agent`, `unknown` status, `title` and `state_labels` left behind |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
 | `socket/pane-focus-ok` | p | the focus call a click makes; reply is `{"id","result"}` |
 | `socket/pane-focus-not-found` | p | `pane_not_found`, the error reply shape |
@@ -147,16 +149,13 @@ Each finding lists the log marks that back it. Several contradict what the
 documentation and other plugins assume about Herdr, so they are recorded here
 with their evidence rather than only in code comments.
 
-`FR-*`, `OQ-*` and `D-*` ids below refer to this project's requirements and
-design notes, which are kept outside the repository. The findings stand on
-their own without them; the ids are just cross-references.
-
 1. **`focused_pane_id` is the event's own pane, not where the user is.**
    Manual: Claude in `w3:p4` blocked 24 s after the user clicked to `w3:p3`
    (and was `done` ~20 s after, in an earlier run). Both events said
    `focused_pane_id: "w3:p4"`. Programmatic runs agree, including a pane
    that wasn't even its tab's focused pane. Across all 196 status events in
-   `raw/` it never differs from the event's pane, so FR-1.4 can't use it.
+   `raw/` it never differs from the event's pane, so it can't tell us
+   whether the user is watching.
    **Use `herdr pane get <pane_id>` instead:** its `focused` field does track
    manual navigation, across panes, tabs and workspaces (polled once a second
    through a manual run, every move seen), exactly one pane is focused
@@ -165,25 +164,69 @@ their own without them; the ids are just cross-references.
 2. **Herdr knows where the user is anyway: an unwatched completion becomes
    `done`.** True for agents (manual) and for reported shell `idle`
    (programmatic), provided a `working` came first. Without a preceding
-   `working` the `idle` stays `idle`. FR-1.2's default
-   `[shell] statuses = idle` would miss the unwatched case, which is the one
-   that matters. `state_labels` survive the change.
+   `working` the `idle` stays `idle`. A `[shell] statuses` of `idle` alone
+   would miss the unwatched case, which is the one that matters, so `done`
+   is in the default set too. `state_labels` survive the change.
 3. **Manual navigation emits no focus events.** Mouse and keyboard, across
    panes, tabs and workspaces: zero `pane/tab/workspace.focused`
-   (OQ-6 regression guard). `herdr tab focus` emits all three in the same
+   (`tests/manual_navigation_emits_no_focus_events.rs`). `herdr tab focus`
+   emits all three in the same
    second, in varying order, and `workspace.focused` fires even when the
    workspace doesn't change.
 4. **`--seq` persists per pane and source, across a release.** Reusing
    `--seq 1` after an earlier claim silently dropped the `working` report.
-   The zsh hook's `--seq` must keep increasing across shells (FR-9.5).
+   The zsh hook's `--seq` must keep increasing across shells.
 5. **Metadata persists across a release.** A new claim's first event carried
    the previous claim's `title` and `state_labels`. The hook must always set
    or clear metadata.
 6. **`report-metadata` alone emits `pane.agent_status_changed`**, with an
-   unchanged status (FR-1.5 dedup).
+   unchanged status, so the same (pane, status) arrives repeatedly and
+   notifications have to be deduplicated.
 7. **Claude `/exit` sends a release; closing its pane doesn't.** `/exit` gives
    `agent_detected {released: true, final_status: "idle"}` then an `unknown`
    status with no `agent` field. `pane.closed` arrived with no release first.
+
+## Findings (2026-09-20 captures)
+
+8. **`pane get` carries both agent-or-shell signals, so `agent get` is never
+   needed.** On a pane claimed with `pane report-agent --agent make`,
+   `pane get` returned `agent: "make"` with no `agent_session` key at all —
+   the same two fields `agent get` returns for a claim like it
+   (`cli/agent-get-reported-no-session`, a different pane on a different
+   day), from the same query that reports `focused`. A pane that never had
+   an agent still gets an answer from `pane get`, where `agent get` fails
+   with `agent_not_found`. `cli/pane-get-reported-no-session`, captured with:
+
+   ```sh
+   seq=$(python3 -c "import time; print(int(time.time() * 1000))")
+   herdr pane report-agent w3:p2 --source herdr-nudge-capture \
+       --agent make --state working --seq $seq
+   herdr pane report-metadata w3:p2 --source herdr-nudge-capture \
+       --title "make test · exit 0 · 2m11s" --state-label "idle=finished" \
+       --seq $((seq + 1))
+   python3 tools/fixtures/extract.py cli pane-get-reported-no-session \
+       pane get w3:p2
+   ```
+
+9. **`release-agent` clears the agent label, and it needs a `--seq`.**
+   After a release the pane has no `agent` at all and `agent_status` back to
+   `unknown`, and `agent get` returns to `agent_not_found`
+   (`cli/pane-get-after-release`). The `title` and `state_labels` stay behind,
+   like finding 5 says. **A release whose `--seq` is not higher than the last
+   report is dropped in silence** — exit 0, no output, nothing changes.
+   Reproduced three times: the first capture of this fixture recorded a
+   release that never happened, because it passed no `--seq` at all. The zsh
+   hook releases on every `preexec` and on `zshexit`, so both have to carry a
+   `--seq` like the reports do.
+
+   `revision` is no help in telling whether any of this landed: it stayed at
+   43 across a claim, a report, a dropped release and a real one.
+
+10. **A reporter could bind a session if it wanted one.**
+    `pane report-agent` takes `--agent-session-id` and
+    `--agent-session-path`, so the missing `agent_session` is a fact about
+    shell hooks that don't pass them, not something Herdr enforces. Ours
+    doesn't pass them.
 
 ## Still missing
 
