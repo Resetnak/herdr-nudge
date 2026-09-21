@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "lsappinfo",
+    "info",
+    "-only",
+    "bundleid",
+    "ASN:0x0-0x64b64b:"
+  ],
+  "captured_at": "2026-09-20T14:45:53",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "\"CFBundleIdentifier\"=\"com.mitchellh.ghostty\"\n",
+  "stderr": ""
+}

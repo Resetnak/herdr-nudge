@@ -1,0 +1,6 @@
+{
+  "captured_at": "2026-09-20T14:45:53",
+  "herdr_version": "herdr 0.9.0",
+  "request": "{\"id\": \"capture\", \"method\": \"pane.focus\", \"params\": {\"pane_id\": \"w999:p1\"}}\n",
+  "response": "{\"id\":\"capture\",\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane w999:p1 not found\"}}\n"
+}

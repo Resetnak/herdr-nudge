@@ -7,6 +7,8 @@ hand-written. Don't edit them; recapture instead.
 raw/                 probe logs, exactly as tools/probe/dump.sh wrote them
 events/<category>/   one plugin invocation each, generated from raw/
 cli/                 read-only `herdr` queries: argv, exit code, stdout, stderr
+socket/              one Herdr socket request and its reply line
+sys/                 macOS tools (lsappinfo): argv, exit code, output
 ```
 
 Regenerate with `tools/fixtures/extract.py`:
@@ -15,15 +17,17 @@ Regenerate with `tools/fixtures/extract.py`:
 python3 tools/fixtures/extract.py list [LOG]    # index a probe log, with its marks
 python3 tools/fixtures/extract.py write         # regenerate events/ from raw/
 python3 tools/fixtures/extract.py cli NAME ARGS # capture `herdr ARGS` into cli/
-python3 tools/fixtures/extract.py scrub         # redact raw/ and cli/ in place
+python3 tools/fixtures/extract.py socket NAME METHOD PARAMS_JSON  # into socket/
+python3 tools/fixtures/extract.py sys NAME PROG ARGS  # into sys/
+python3 tools/fixtures/extract.py scrub         # redact the captures in place
 ```
 
 ## Redaction
 
 These files are published, so the capturing machine's identity is replaced
-before they are committed. `scrub` rewrites `raw/` and `cli/` in place, and
-`write` then regenerates `events/` from the redacted logs. It also runs
-automatically after every `cli` capture, and it is idempotent.
+before they are committed. `scrub` rewrites `raw/`, `cli/`, `socket/` and
+`sys/` in place, and `write` then regenerates `events/` from the redacted
+logs. It also runs automatically after every capture, and it is idempotent.
 
 | Real | In the fixtures |
 |---|---|
@@ -81,6 +85,11 @@ A programmatic result is never evidence for manual behaviour, or the reverse.
 }
 ```
 
+A `socket/` or `sys/` capture is only safe to repeat: both run against the
+live machine, and `socket` talks to the running server. `sys` stores the
+bare program name, because tests match a recording by file name while the
+code calls a tool by absolute path.
+
 `event_json` and the env values are kept as strings so a test can hand the
 plugin the same bytes Herdr did. Plugin root, state and config paths in `env`
 belong to the probe; tests should override them.
@@ -126,6 +135,11 @@ belong to the probe; tests should override them.
 | `cli/pane-get-focused` | – | `focused: true` for the pane the user is on (FR-1.4) |
 | `cli/pane-get-unfocused` | – | `focused: false`, and it works on a plain shell pane |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
+| `socket/pane-focus-ok` | p | the focus call a click makes; reply is `{"id","result"}` |
+| `socket/pane-focus-not-found` | p | `pane_not_found`, the error reply shape |
+| `sys/lsappinfo-front` | – | the frontmost app's ASN |
+| `sys/lsappinfo-bundleid-ghostty` | – | that ASN's bundle id |
+| `sys/lsappinfo-bundleid-gone` | – | an app that has quit: `[ NULL ]`, still exit 0 |
 
 ## Findings (2026-09-18 captures)
 

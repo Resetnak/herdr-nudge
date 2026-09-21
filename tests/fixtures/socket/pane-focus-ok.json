@@ -1,0 +1,6 @@
+{
+  "captured_at": "2026-09-20T14:45:53",
+  "herdr_version": "herdr 0.9.0",
+  "request": "{\"id\": \"capture\", \"method\": \"pane.focus\", \"params\": {\"pane_id\": \"w3:p1\"}}\n",
+  "response": "{\"id\":\"capture\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"w3:p1\",\"terminal_id\":\"term_65bceb9e23266a\",\"workspace_id\":\"w3\",\"tab_id\":\"w3:t1\",\"focused\":true,\"cwd\":\"/Users/dev/Developer/herdr-nudge\",\"foreground_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"agent\":\"claude\",\"terminal_title\":\"◐ M2 modules config state herdr and terminal\",\"terminal_title_stripped\":\"M2 modules config state herdr and terminal\",\"agent_status\":\"blocked\",\"agent_session\":{\"source\":\"herdr:claude\",\"agent\":\"claude\",\"kind\":\"id\",\"value\":\"00000000-0000-4000-8000-000000000003\"},\"scroll\":{\"offset_from_bottom\":0,\"max_offset_from_bottom\":0,\"viewport_rows\":57},\"revision\":27}}}\n"
+}

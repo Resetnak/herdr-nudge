@@ -2,10 +2,18 @@
 //!
 //! [`cli`] reads the arguments, [`event`] parses what Herdr sends, and
 //! [`context`] holds the workspace info and the paths we were given.
+//! [`config`] is the user's settings, [`state`] our own files, [`herdr`]
+//! every question we ask Herdr, and [`terminal`] which app to bring forward
+//! on a click.
 
 pub mod cli;
+pub mod config;
 pub mod context;
 pub mod event;
+pub mod herdr;
+pub mod process;
+pub mod state;
+pub mod terminal;
 
 use context::Context;
 use event::{Envelope, EventData};

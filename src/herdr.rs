@@ -1,0 +1,187 @@
+//! Talking to Herdr. Queries go through the `herdr` CLI; focusing a pane
+//! goes over the socket, because the CLI can't do it for a plain shell pane
+//! (`herdr agent focus` only knows agent panes, and `herdr pane focus` only
+//! moves by direction).
+//!
+//! Reply shapes are pinned by `tests/fixtures/cli/` and
+//! `tests/fixtures/socket/`.
+
+use std::fmt;
+use std::io::{self, BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::Duration;
+
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+
+use crate::process::Runner;
+
+/// What `pane get` and `agent get` say about a pane. They return the same
+/// shape under different keys (`pane` and `agent`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PaneInfo {
+    pub pane_id: String,
+    pub workspace_id: String,
+    #[serde(default)]
+    pub tab_id: Option<String>,
+    /// Follows the user's manual navigation, unlike the event context's
+    /// `focused_pane_id`. Exactly one pane is focused across the server.
+    pub focused: bool,
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Only set when an agent's own Herdr integration reported a session.
+    /// Detecting an agent from its screen never sets it.
+    #[serde(default)]
+    pub agent_session: Option<serde_json::Value>,
+    #[serde(default)]
+    pub terminal_title_stripped: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    /// Couldn't run `herdr` or reach the socket, or it timed out.
+    Io(io::Error),
+    /// Herdr answered with an error object.
+    Api { code: String, message: String },
+    /// An answer we couldn't read.
+    Unexpected(String),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Io(e) => write!(f, "{e}"),
+            Error::Api { code, message } => write!(f, "herdr: {code}: {message}"),
+            Error::Unexpected(what) => write!(f, "unexpected reply from herdr: {what}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+/// Every reply, CLI or socket, is either `{"result": …}` or
+/// `{"error": {"code", "message"}}`.
+#[derive(Deserialize)]
+struct Reply<T> {
+    result: Option<T>,
+    error: Option<ApiError>,
+}
+
+#[derive(Deserialize)]
+struct ApiError {
+    code: String,
+    message: String,
+}
+
+fn parse_reply<T: DeserializeOwned>(text: &str) -> Result<T, Error> {
+    let reply: Reply<T> =
+        serde_json::from_str(text.trim()).map_err(|e| Error::Unexpected(format!("{e}: {text}")))?;
+    match (reply.result, reply.error) {
+        (_, Some(e)) => Err(Error::Api {
+            code: e.code,
+            message: e.message,
+        }),
+        (Some(result), None) => Ok(result),
+        (None, None) => Err(Error::Unexpected(text.to_owned())),
+    }
+}
+
+pub struct Cli<'a, R: Runner> {
+    pub bin: &'a Path,
+    pub runner: &'a R,
+}
+
+impl<R: Runner> Cli<'_, R> {
+    /// Pane ids go in as plain arguments. `herdr` doesn't accept `--`, but
+    /// it also reads an argument starting with `-` as a pane id rather than
+    /// a flag (checked on 0.9.0), so a strange id just isn't found.
+    fn query<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Error> {
+        let out = self.runner.run(self.bin, args)?;
+        // Errors come on stderr with exit 1; success on stdout with exit 0.
+        if out.success() {
+            parse_reply(&out.stdout)
+        } else {
+            match parse_reply::<serde_json::Value>(&out.stderr) {
+                Err(api @ Error::Api { .. }) => Err(api),
+                _ => Err(Error::Unexpected(format!(
+                    "exit {:?}: {}",
+                    out.code,
+                    out.stderr.trim()
+                ))),
+            }
+        }
+    }
+
+    pub fn pane_get(&self, pane_id: &str) -> Result<PaneInfo, Error> {
+        #[derive(Deserialize)]
+        struct Body {
+            pane: PaneInfo,
+        }
+        self.query::<Body>(&["pane", "get", pane_id])
+            .map(|r| r.pane)
+    }
+
+    /// `None` for a pane with no agent identity at all, which Herdr reports
+    /// as an `agent_not_found` error.
+    pub fn agent_get(&self, pane_id: &str) -> Result<Option<PaneInfo>, Error> {
+        #[derive(Deserialize)]
+        struct Body {
+            agent: PaneInfo,
+        }
+        match self.query::<Body>(&["agent", "get", pane_id]) {
+            Ok(r) => Ok(Some(r.agent)),
+            Err(Error::Api { code, .. }) if code == "agent_not_found" => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The agent labels Herdr can detect by itself, e.g. `claude`, `codex`.
+    pub fn agent_manifests(&self) -> Result<Vec<String>, Error> {
+        #[derive(Deserialize)]
+        struct Body {
+            manifests: Vec<Manifest>,
+        }
+        #[derive(Deserialize)]
+        struct Manifest {
+            agent: String,
+        }
+        self.query::<Body>(&["server", "agent-manifests", "--json"])
+            .map(|r| r.manifests.into_iter().map(|m| m.agent).collect())
+    }
+}
+
+/// Asks Herdr to focus a pane, over the socket.
+///
+/// This is the call the click makes, and the click has no `HERDR_*`
+/// environment, so the socket path has to come from the caller.
+///
+/// `timeout` bounds the reply, not the connect: `UnixStream` has no
+/// connect timeout in std. A server that has stopped accepting would leave
+/// a click waiting. Nothing is on screen by then, so the cost is a click
+/// that appears to do nothing.
+pub fn focus_pane(socket_path: &Path, pane_id: &str, timeout: Duration) -> Result<(), Error> {
+    let request = serde_json::json!({
+        "id": "herdr-nudge",
+        "method": "pane.focus",
+        "params": { "pane_id": pane_id },
+    });
+
+    let mut stream = UnixStream::connect(socket_path)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let mut line = request.to_string();
+    line.push('\n');
+    stream.write_all(line.as_bytes())?;
+
+    // One request, one reply line.
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply)?;
+    parse_reply::<serde_json::Value>(&reply).map(|_| ())
+}

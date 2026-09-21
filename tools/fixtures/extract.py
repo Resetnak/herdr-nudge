@@ -4,7 +4,9 @@
     python3 tools/fixtures/extract.py list  [LOG]   # index every record
     python3 tools/fixtures/extract.py write         # (re)write tests/fixtures/events
     python3 tools/fixtures/extract.py cli NAME ARGS # run `herdr ARGS`, save tests/fixtures/cli/NAME.json
-    python3 tools/fixtures/extract.py scrub         # redact raw/ and cli/ in place, then rerun write
+    python3 tools/fixtures/extract.py scrub         # redact raw/, cli/, socket/ and sys/ in place
+    python3 tools/fixtures/extract.py socket NAME METHOD PARAMS_JSON  # one socket request, saved to socket/NAME.json
+    python3 tools/fixtures/extract.py sys NAME PROG ARGS  # run a macOS tool, save sys/NAME.json
 
 Parses a probe log (tools/probe/dump.sh format) and writes one JSON file per
 selected record. Nothing is hand-written: `event_json` and every env value are
@@ -23,6 +25,8 @@ RAW_DIR = os.path.join(ROOT, "tests/fixtures/raw")
 RAW = os.path.join(RAW_DIR, "events-2026-09-18.log")
 OUT = os.path.join(ROOT, "tests/fixtures/events")
 CLI = os.path.join(ROOT, "tests/fixtures/cli")
+SOCKET = os.path.join(ROOT, "tests/fixtures/socket")
+SYS = os.path.join(ROOT, "tests/fixtures/sys")
 
 # These fixtures are published, so the capturing machine's identity comes out
 # first. Substitutions are literal, applied everywhere, and idempotent: the
@@ -58,10 +62,12 @@ def redact(text, uuid_map, counter):
 
 
 def scrub():
-    """Redact raw/ and cli/ in place. Run `write` afterwards to regenerate
-    events/ from the redacted logs."""
+    """Redact raw/, cli/, socket/ and sys/ in place. Run `write` afterwards
+    to regenerate events/ from the redacted logs."""
     targets = [os.path.join(RAW_DIR, n) for n in sorted(os.listdir(RAW_DIR)) if n.endswith(".log")]
-    targets += [os.path.join(CLI, n) for n in sorted(os.listdir(CLI)) if n.endswith(".json")]
+    for d in (CLI, SOCKET, SYS):
+        if os.path.isdir(d):
+            targets += [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.endswith(".json")]
     contents = {}
     used = [0]
     for path in targets:
@@ -190,6 +196,10 @@ def main():
         write()
     elif cmd == "cli" and len(sys.argv) > 3:
         cli(sys.argv[2], sys.argv[3:])
+    elif cmd == "socket" and len(sys.argv) == 5:
+        socket_request(sys.argv[2], sys.argv[3], json.loads(sys.argv[4]))
+    elif cmd == "sys" and len(sys.argv) > 3:
+        sys_command(sys.argv[2], sys.argv[3:])
     elif cmd == "scrub":
         scrub()
     else:
@@ -255,6 +265,70 @@ def write():
                 f.write("\n")
             index.append(os.path.relpath(path, ROOT))
     print("\n".join(index))
+
+
+
+
+def save(directory, name, fixture):
+    path = os.path.join(directory, name + ".json")
+    os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(fixture, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    scrub()
+    return path
+
+
+def socket_request(name, method, params):
+    """Send one request to the Herdr socket and store the raw reply line.
+
+    Only use methods that are safe to repeat: this talks to the live server."""
+    import datetime
+    import socket
+    import subprocess
+
+    herdr = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.local/bin/herdr")
+    version = subprocess.run([herdr, "--version"], capture_output=True, text=True).stdout.strip()
+    path = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
+    request = json.dumps({"id": "capture", "method": method, "params": params}) + "\n"
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(2)
+    client.connect(path)
+    client.sendall(request.encode())
+    reply = b""
+    while not reply.endswith(b"\n"):
+        chunk = client.recv(65536)
+        if not chunk:
+            break
+        reply += chunk
+    client.close()
+    out = save(SOCKET, name, {
+        "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "herdr_version": version,
+        "request": request,
+        "response": reply.decode(),
+    })
+    print(os.path.relpath(out, ROOT))
+
+
+def sys_command(name, argv):
+    """Run a macOS tool (lsappinfo) and store its exit code and output."""
+    import datetime
+    import platform
+    import subprocess
+
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    # The bare program name, like cli() does: the test runner matches a
+    # recording by file name, because the code calls tools by absolute path.
+    out = save(SYS, name, {
+        "argv": [os.path.basename(argv[0])] + argv[1:],
+        "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "macos_version": platform.mac_ver()[0],
+        "exit_code": proc.returncode,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    })
+    print(os.path.relpath(out, ROOT), "exit", proc.returncode)
 
 
 if __name__ == "__main__":

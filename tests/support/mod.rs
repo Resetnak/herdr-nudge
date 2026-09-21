@@ -6,12 +6,15 @@
 
 #![allow(dead_code)] // Not every helper has a caller yet.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use herdr_nudge::context::{Context, Env};
 use herdr_nudge::event::Envelope;
+use herdr_nudge::process::{Output, Runner};
 use serde::Deserialize;
 
 /// One `tests/fixtures/events/<category>/<name>.json`.
@@ -206,4 +209,123 @@ pub fn mark_index(records: &[Record], needle: &str) -> usize {
         matches.len()
     );
     matches[0]
+}
+
+/// A recorded command: `tests/fixtures/cli/<name>.json` (a `herdr` query) or
+/// `tests/fixtures/sys/<name>.json` (a macOS tool).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Recorded {
+    /// `argv[0]` is the bare program name, not the path it ran from.
+    pub argv: Vec<String>,
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Recorded {
+    pub fn cli(name: &str) -> Recorded {
+        Recorded::load("cli", name)
+    }
+
+    pub fn sys(name: &str) -> Recorded {
+        Recorded::load("sys", name)
+    }
+
+    fn load(dir: &str, name: &str) -> Recorded {
+        let path = fixtures_dir().join(dir).join(format!("{name}.json"));
+        let json =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        serde_json::from_str(&json).unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))
+    }
+
+    pub fn output(&self) -> Output {
+        Output {
+            code: Some(self.exit_code),
+            stdout: self.stdout.clone(),
+            stderr: self.stderr.clone(),
+        }
+    }
+}
+
+/// `tests/fixtures/socket/<name>.json`: one request line and the reply line.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SocketExchange {
+    pub request: String,
+    pub response: String,
+}
+
+impl SocketExchange {
+    pub fn load(name: &str) -> SocketExchange {
+        let path = fixtures_dir().join("socket").join(format!("{name}.json"));
+        let json =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        serde_json::from_str(&json).unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))
+    }
+}
+
+/// A `Runner` that plays back recordings instead of running anything, and
+/// keeps every argv it was asked to run.
+///
+/// A recording matches a call when the arguments after the program name are
+/// equal and the program's file name is `argv[0]`.
+#[derive(Default)]
+pub struct Replay {
+    recordings: Vec<Recorded>,
+    pub calls: RefCell<Vec<Vec<String>>>,
+}
+
+impl Replay {
+    pub fn new(recordings: impl IntoIterator<Item = Recorded>) -> Replay {
+        Replay {
+            recordings: recordings.into_iter().collect(),
+            calls: RefCell::default(),
+        }
+    }
+
+    /// Answers `args` with `recorded`'s output, whatever its own argv says.
+    /// For asking about a pane id other than the one captured.
+    pub fn answering(program: &str, args: &[&str], recorded: &Recorded) -> Replay {
+        let mut recorded = recorded.clone();
+        recorded.argv = std::iter::once(program)
+            .chain(args.iter().copied())
+            .map(str::to_owned)
+            .collect();
+        Replay::new([recorded])
+    }
+
+    pub fn call_count(&self) -> usize {
+        self.calls.borrow().len()
+    }
+}
+
+impl Runner for Replay {
+    fn run(&self, program: &Path, args: &[&str]) -> io::Result<Output> {
+        let mut call = vec![program.display().to_string()];
+        call.extend(args.iter().map(|a| a.to_string()));
+        self.calls.borrow_mut().push(call);
+
+        let name = program
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
+        self.recordings
+            .iter()
+            .find(|r| Some(&r.argv[0]) == name.as_ref() && r.argv[1..] == *args)
+            .map(Recorded::output)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("no recording for {} {args:?}", program.display()),
+                )
+            })
+    }
+}
+
+/// An empty directory for one test, under Cargo's per-test scratch space.
+/// Cleared at the start rather than the end, so a failing test's files are
+/// still there to look at.
+pub fn scratch_dir(test_name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(test_name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("creating {}: {e}", dir.display()));
+    dir
 }
