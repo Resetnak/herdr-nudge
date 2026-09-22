@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use herdr_nudge::context::{Context, Env};
 use herdr_nudge::event::Envelope;
-use herdr_nudge::process::{Output, Runner};
+use herdr_nudge::process::{Output, Runner, Spawner};
 use serde::Deserialize;
 
 /// One `tests/fixtures/events/<category>/<name>.json`.
@@ -317,6 +317,50 @@ impl Runner for Replay {
                     format!("no recording for {} {args:?}", program.display()),
                 )
             })
+    }
+}
+
+/// A `Spawner` that records argv instead of starting anything.
+#[derive(Default)]
+pub struct Spy {
+    pub spawns: RefCell<Vec<Vec<String>>>,
+    /// Makes every spawn fail, for the "the notifier wouldn't start" paths.
+    pub fail: bool,
+}
+
+impl Spy {
+    pub fn failing() -> Spy {
+        Spy {
+            fail: true,
+            ..Spy::default()
+        }
+    }
+
+    /// Argv of the one spawn, with the program path first. Panics if there
+    /// wasn't exactly one, so a test can't accidentally assert on the wrong
+    /// call.
+    pub fn only(&self) -> Vec<String> {
+        let spawns = self.spawns.borrow();
+        assert_eq!(spawns.len(), 1, "expected one spawn, got {spawns:?}");
+        spawns[0].clone()
+    }
+
+    /// The value after `flag`, e.g. `flag("-title")`.
+    pub fn arg_after(argv: &[String], flag: &str) -> Option<String> {
+        let at = argv.iter().position(|a| a == flag)?;
+        argv.get(at + 1).cloned()
+    }
+}
+
+impl Spawner for Spy {
+    fn spawn(&self, program: &Path, args: &[String]) -> io::Result<()> {
+        let mut call = vec![program.display().to_string()];
+        call.extend_from_slice(args);
+        self.spawns.borrow_mut().push(call);
+        if self.fail {
+            return Err(io::Error::other("spy refuses to spawn"));
+        }
+        Ok(())
     }
 }
 

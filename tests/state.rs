@@ -7,9 +7,11 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
 use herdr_nudge::classify::{Classification, ClassifySignal, PaneKind};
+use herdr_nudge::cli::JobId;
+use herdr_nudge::event::AgentStatus;
 use herdr_nudge::state::{
-    AgentsCache, FOCUS_ORIGIN_TTL_MS, FocusOrigin, Loaded, PaneRecord, StateDir, TerminalMemory,
-    VERSION, write_atomic,
+    AgentsCache, FOCUS_ORIGIN_TTL_MS, FocusOrigin, Job, Loaded, PaneRecord, StateDir,
+    TerminalMemory, VERSION, write_atomic,
 };
 use support::scratch_dir;
 
@@ -306,5 +308,90 @@ fn a_pane_id_cannot_name_a_file_outside_the_panes_directory() {
     match state.pane_record(escaping).unwrap() {
         Loaded::Found(read) => assert_eq!(read.pane_id, escaping),
         other => panic!("{}: expected Found, got {other:?}", path.display()),
+    }
+}
+
+/// A job file name is a job id, and everything else in the directory is
+/// something we put there ourselves: temp files and set-aside corrupt ones.
+#[test]
+fn listing_jobs_skips_names_that_are_not_job_ids() {
+    let state = StateDir::new(scratch_dir("job_ids_skip_junk"));
+    let id = JobId::parse("0123456789abcdef").unwrap();
+    state.save_job(&job(&id)).unwrap();
+
+    let jobs = state.jobs_dir();
+    for name in [
+        ".0123456789abcdef.json.999.0.tmp",
+        "0123456789abcdef.json.corrupt-1700000000000",
+        "not-a-job.json",
+        "0123456789ABCDEF.json",
+        "0123456789abcde.json",
+        "0123456789abcdef.txt",
+    ] {
+        fs::write(jobs.join(name), b"{}").unwrap();
+    }
+
+    assert_eq!(
+        state.job_ids().unwrap(),
+        vec![id],
+        "only the one real job should be listed"
+    );
+}
+
+#[test]
+fn listing_jobs_before_any_exist_is_empty_not_an_error() {
+    let state = StateDir::new(scratch_dir("job_ids_empty"));
+    assert_eq!(
+        state.job_ids().unwrap(),
+        Vec::<JobId>::new(),
+        "no jobs directory yet"
+    );
+}
+
+/// A job we cannot read must not stop a click or a sweep.
+#[test]
+fn a_corrupt_job_is_moved_aside() {
+    let state = StateDir::new(scratch_dir("corrupt_job"));
+    let id = JobId::parse("0123456789abcdef").unwrap();
+    state.save_job(&job(&id)).unwrap();
+    fs::write(state.job_path(&id), b"{ not json").unwrap();
+
+    let Ok(Loaded::Recovered(recovered)) = state.job(&id) else {
+        panic!("a corrupt job should be recovered, not returned");
+    };
+    assert_eq!(recovered.path, state.job_path(&id), "recovered path");
+    assert!(
+        matches!(state.job(&id), Ok(Loaded::Missing)),
+        "after recovery the job should read as missing"
+    );
+}
+
+#[test]
+fn a_job_id_is_the_file_name() {
+    let state = StateDir::new(Path::new("/state"));
+    let id = JobId::parse("0123456789abcdef").unwrap();
+    assert_eq!(
+        state.job_path(&id),
+        Path::new("/state/jobs/0123456789abcdef.json"),
+        "job path"
+    );
+}
+
+fn job(id: &JobId) -> Job {
+    Job {
+        version: VERSION,
+        id: id.to_string(),
+        pane_id: "w1:p1".to_owned(),
+        workspace_id: "w1".to_owned(),
+        agent_label: Some("claude".to_owned()),
+        kind: PaneKind::Agent,
+        status: AgentStatus::Blocked,
+        group: "herdr-nudge-w1:p1".to_owned(),
+        bundle_id: None,
+        socket_path: std::path::PathBuf::from("/tmp/herdr.sock"),
+        notifier_path: std::path::PathBuf::from("/plugin/notifier"),
+        created_at_ms: 1_000,
+        expires_at_ms: 9_000,
+        repeat_after_ms: 0,
     }
 }

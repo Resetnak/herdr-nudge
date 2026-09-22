@@ -22,10 +22,22 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::classify::{Classification, ClassifySignal, PaneKind};
+use crate::cli::JobId;
+use crate::event::AgentStatus;
 
 /// Bumped when a file's shape changes. A file with any other version is
 /// moved aside like a corrupt one.
 pub const VERSION: u32 = 1;
+
+/// How long a posted notification stops the same status notifying again.
+///
+/// Reporting metadata alone emits a status event carrying the unchanged
+/// status, so the same thing arrives more than once and needs swallowing.
+/// But it must be much shorter than how long the notification stays
+/// clickable: dismissing a banner tells us nothing, so a long window would
+/// leave a pane silent for the rest of the hour after a swipe. Seconds is
+/// all the churn needs.
+pub const REPEAT_AFTER_MS: u64 = 60_000;
 
 /// How long after our own click we refuse to learn a terminal. The click
 /// brings the terminal forward, but for a moment Notification Center or the
@@ -315,6 +327,11 @@ pub struct PaneRecord {
     pub kind: PaneKind,
     pub signal: ClassifySignal,
     pub classified_at_ms: u64,
+    /// The job for the notification currently showing for this pane, if
+    /// there is one. What stops the same status being notified twice, and
+    /// what a click clears.
+    #[serde(default)]
+    pub live_job: Option<String>,
 }
 
 impl Versioned for PaneRecord {
@@ -337,8 +354,93 @@ impl PaneRecord {
             kind: classification.kind,
             signal: classification.signal,
             classified_at_ms: now_ms,
+            live_job: None,
         }
     }
+
+    /// True when this record is about the same agent identity as `agent`.
+    ///
+    /// A pane that ran `claude` and now runs `make` is a different identity,
+    /// and the old answer says nothing about the new one.
+    pub fn is_about(&self, agent: Option<&str>) -> bool {
+        self.agent.as_deref() == agent
+    }
+}
+
+/// `jobs/<id>.json`: everything a click needs, written before the
+/// notification is posted.
+///
+/// macOS launches the click command with no `HERDR_*` variables and a bare
+/// `PATH`, so anything we learned from the environment has to be on disk by
+/// then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Job {
+    pub version: u32,
+    /// Also the file name.
+    pub id: String,
+    pub pane_id: String,
+    pub workspace_id: String,
+    pub agent_label: Option<String>,
+    pub kind: PaneKind,
+    /// Only ever a status the config asked for, so never `Unknown` — which
+    /// matters because `Unknown` covers any status Herdr adds later and would
+    /// be written back out as the word "unknown".
+    pub status: AgentStatus,
+    pub group: String,
+    /// `None` means focus the pane without bringing an app forward.
+    pub bundle_id: Option<String>,
+    pub socket_path: PathBuf,
+    /// So the click can withdraw the notification.
+    pub notifier_path: PathBuf,
+    pub created_at_ms: u64,
+    pub expires_at_ms: u64,
+    /// Until when this notification stops the same status posting again.
+    /// Much sooner than `expires_at_ms`, and for a different reason.
+    ///
+    /// Defaulted so a job written before this field existed still reads; 0
+    /// then means it blocks nothing, which errs towards notifying.
+    #[serde(default)]
+    pub repeat_after_ms: u64,
+}
+
+impl Versioned for Job {
+    fn version(&self) -> u32 {
+        self.version
+    }
+}
+
+impl Job {
+    /// Past this, the notification is no longer clickable and gets swept.
+    pub fn is_expired(&self, now_ms: u64) -> bool {
+        now_ms >= self.expires_at_ms
+    }
+
+    /// Whether posting the same status again would just be a duplicate.
+    pub fn blocks_repeat(&self, now_ms: u64) -> bool {
+        !self.is_expired(now_ms) && now_ms < self.repeat_after_ms
+    }
+}
+
+/// A job id: 11 hex of the clock, 1 of a counter, 4 of the process id.
+///
+/// The clock and the pid separate us from other runs; the counter separates
+/// two ids made by the same run in the same millisecond. One event posts at
+/// most one notification, so the counter should never be needed — but an id
+/// that collides silently overwrites another pane's live job, and a caller
+/// that posts twice is not something the type stops. 44 bits of milliseconds
+/// runs out in the year 2527.
+///
+/// Nothing here needs to be unguessable: a click only reads a file in our
+/// own state directory.
+pub fn new_job_id(now_ms: u64, pid: u32) -> JobId {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let id = format!(
+        "{:011x}{:01x}{:04x}",
+        now_ms & 0xfff_ffff_ffff,
+        COUNTER.fetch_add(1, Ordering::Relaxed) & 0xf,
+        pid & 0xffff
+    );
+    JobId::parse(&id).expect("a job id built from a clock, a counter and a pid is 16 lowercase hex")
 }
 
 /// Pane ids go into file names as hex. They look like `w3:p1` today, but
@@ -358,9 +460,82 @@ pub struct StateDir {
     pub root: PathBuf,
 }
 
+/// Where Herdr puts our state when it isn't telling us.
+///
+/// A click has no `HERDR_*` environment and its argument is only a job id, so
+/// it has to find the state directory itself. Herdr 0.9.0 uses
+/// `~/.local/state/herdr/plugins/<plugin id>` (see the captured environment
+/// in any `tests/fixtures/events/` file). `XDG_STATE_HOME` is tried first as
+/// the usual convention, though no Herdr version has been seen honouring it.
+pub const PLUGIN_ID: &str = "herdr-nudge";
+
 impl StateDir {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         StateDir { root: root.into() }
+    }
+
+    /// `HERDR_PLUGIN_STATE_DIR` when we have it, the guessed path otherwise.
+    ///
+    /// If the guess is wrong, notifications still post but every click is a
+    /// silent no-op, because the job file is somewhere this process won't
+    /// look. `doctor` should compare the two and say so.
+    pub fn locate(lookup: impl Fn(&str) -> Option<String>) -> Option<StateDir> {
+        if let Some(dir) = lookup("HERDR_PLUGIN_STATE_DIR").filter(|d| !d.is_empty()) {
+            return Some(StateDir::new(dir));
+        }
+        let base = match lookup("XDG_STATE_HOME").filter(|d| !d.is_empty()) {
+            Some(xdg) => PathBuf::from(xdg),
+            None => PathBuf::from(lookup("HOME").filter(|h| !h.is_empty())?).join(".local/state"),
+        };
+        Some(StateDir::new(base.join("herdr/plugins").join(PLUGIN_ID)))
+    }
+
+    pub fn jobs_dir(&self) -> PathBuf {
+        self.root.join("jobs")
+    }
+
+    pub fn job_path(&self, id: &JobId) -> PathBuf {
+        self.jobs_dir().join(format!("{id}.json"))
+    }
+
+    pub fn job(&self, id: &JobId) -> io::Result<Loaded<Job>> {
+        read_json(&self.job_path(id))
+    }
+
+    pub fn save_job(&self, job: &Job) -> io::Result<()> {
+        let id = JobId::parse(&job.id)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+        write_json(&self.job_path(&id), job)
+    }
+
+    pub fn delete_job(&self, id: &JobId) -> io::Result<()> {
+        match fs::remove_file(self.job_path(id)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Every job on disk. Names that aren't a job id are skipped, which is
+    /// also how the `.tmp` and `.corrupt-*` files are left alone.
+    pub fn job_ids(&self) -> io::Result<Vec<JobId>> {
+        let entries = match fs::read_dir(self.jobs_dir()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut ids = Vec::new();
+        for entry in entries {
+            let name = entry?.file_name();
+            let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+                continue;
+            };
+            if let Ok(id) = JobId::parse(stem) {
+                ids.push(id);
+            }
+        }
+        ids.sort();
+        Ok(ids)
     }
 
     pub fn terminal_memory_path(&self) -> PathBuf {

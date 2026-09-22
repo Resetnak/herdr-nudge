@@ -30,6 +30,15 @@ pub trait Runner {
     fn run(&self, program: &Path, args: &[&str]) -> io::Result<Output>;
 }
 
+/// Starting a program and not waiting for it.
+///
+/// Separate from [`Runner`] so that posting a notification has no way to
+/// wait: Herdr runs an event hook synchronously and blocks on it, so holding
+/// it open for the notifier would delay every event behind it.
+pub trait Spawner {
+    fn spawn(&self, program: &Path, args: &[String]) -> io::Result<()>;
+}
+
 /// Runs real processes, and gives up on any that take longer than
 /// `timeout`, whether it's the program that won't exit or its output that
 /// won't arrive.
@@ -91,6 +100,20 @@ impl Runner for System {
             stdout: collect(stdout, deadline).ok_or_else(timed_out)?,
             stderr: collect(stderr, deadline).ok_or_else(timed_out)?,
         })
+    }
+}
+
+impl Spawner for System {
+    /// The child is left running with its pipes closed. It outlives us: we
+    /// exit within milliseconds and launchd takes over as its parent.
+    fn spawn(&self, program: &Path, args: &[String]) -> io::Result<()> {
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
     }
 }
 

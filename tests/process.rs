@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use herdr_nudge::process::{Runner, System};
+use herdr_nudge::process::{Runner, Spawner, System};
 
 fn system(ms: u64) -> System {
     System {
@@ -81,4 +81,43 @@ fn a_missing_program_is_an_error() {
         .run(Path::new("/nonexistent/herdr"), &[])
         .expect_err("should have failed to spawn");
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
+
+/// Herdr runs an event hook synchronously and waits for it, so posting a
+/// notification must not wait for the notifier. `Runner` waits; `Spawner`
+/// must not.
+#[test]
+fn spawning_returns_before_the_child_does() {
+    let system = System::default();
+    let started = Instant::now();
+    system
+        .spawn(Path::new("/bin/sleep"), &["5".to_owned()])
+        .expect("sleep should start");
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "spawning /bin/sleep 5 took {elapsed:?}; it should return at once"
+    );
+}
+
+/// The same command through `Runner` does wait, which is the difference the
+/// two traits exist to make.
+#[test]
+fn running_waits_for_the_child() {
+    let system = System {
+        timeout: Duration::from_millis(300),
+    };
+    let started = Instant::now();
+    let result = system.run(Path::new("/bin/sleep"), &["5"]);
+    let elapsed = started.elapsed();
+
+    assert!(
+        result.is_err(),
+        "sleep 5 should hit the timeout, got {result:?}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(250),
+        "run returned after {elapsed:?}; it should have waited for the timeout"
+    );
 }
