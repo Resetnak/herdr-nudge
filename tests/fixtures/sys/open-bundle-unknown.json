@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "open",
+    "-b",
+    "io.github.dev.no-such-app"
+  ],
+  "captured_at": "2026-09-21T20:59:23",
+  "macos_version": "26.6.2",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "LSCopyApplicationURLsForBundleIdentifier() failed while trying to determine the application with bundle identifier io.github.dev.no-such-app.\n"
+}

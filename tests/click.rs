@@ -1,32 +1,65 @@
-//! What a clicked notification does with its job file.
+//! What a clicked notification does: clear its job, raise the terminal,
+//! focus the pane.
 
 mod support;
 
-use std::path::PathBuf;
+use std::cell::RefCell;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use herdr_nudge::classify::{Classification, ClassifySignal, PaneKind};
 use herdr_nudge::cli::JobId;
 use herdr_nudge::click::{self, Outcome};
 use herdr_nudge::event::AgentStatus;
+use herdr_nudge::process::{Output, Runner};
 use herdr_nudge::state::{Job, Loaded, PaneRecord, StateDir, VERSION};
-use support::{Spy, scratch_dir};
+use support::{Recorded, Replay, SocketExchange, Spy, fake_herdr, scratch_dir};
+
+/// A [`Replay`] that also notes when each call was made, so a test can tell
+/// whether `open -b` ran before the socket was reached.
+struct Timed {
+    replay: Replay,
+    at: RefCell<Vec<Instant>>,
+}
+
+impl Timed {
+    fn new(replay: Replay) -> Timed {
+        Timed {
+            replay,
+            at: RefCell::default(),
+        }
+    }
+}
+
+impl Runner for Timed {
+    fn run(&self, program: &Path, args: &[&str]) -> io::Result<Output> {
+        self.at.borrow_mut().push(Instant::now());
+        self.replay.run(program, args)
+    }
+}
+
+fn opens_ghostty() -> Replay {
+    Replay::new([Recorded::sys("open-bundle-ghostty")])
+}
 
 fn job_id() -> JobId {
     JobId::parse("0123456789abcdef").expect("16 hex")
 }
 
-fn a_job(id: &JobId, expires_at_ms: u64) -> Job {
+/// Pane `w3:p1`, the one `tests/fixtures/socket/pane-focus-ok.json` focused.
+fn a_job(id: &JobId, expires_at_ms: u64, socket_path: &Path) -> Job {
     Job {
         version: VERSION,
         id: id.to_string(),
-        pane_id: "w1:p1".to_owned(),
-        workspace_id: "w1".to_owned(),
+        pane_id: "w3:p1".to_owned(),
+        workspace_id: "w3".to_owned(),
         agent_label: Some("claude".to_owned()),
         kind: PaneKind::Agent,
         status: AgentStatus::Blocked,
-        group: "herdr-nudge-w1:p1".to_owned(),
+        group: "herdr-nudge-w3:p1".to_owned(),
         bundle_id: Some("com.mitchellh.ghostty".to_owned()),
-        socket_path: PathBuf::from("/tmp/herdr.sock"),
+        socket_path: socket_path.to_owned(),
         notifier_path: PathBuf::from(
             "/plugin/vendor/HerdrNudge.app/Contents/MacOS/terminal-notifier",
         ),
@@ -40,18 +73,185 @@ fn state_for(test_name: &str) -> StateDir {
     StateDir::new(scratch_dir(test_name).join("state"))
 }
 
+/// A socket path nothing listens on, for tests that aren't about focusing.
+fn no_socket(test_name: &str) -> PathBuf {
+    scratch_dir(&format!("{test_name}_sock")).join("absent.sock")
+}
+
 /// A notification can sit in Notification Center long after its job is gone.
 #[test]
 fn clicking_with_no_job_does_nothing() {
     let state = state_for("click_no_job");
+    let runner = Replay::default();
     let spy = Spy::default();
-    let (outcome, notes) = click::run(&state, &spy, &job_id(), 2_000);
+    let (outcome, notes) = click::run(&state, &runner, &spy, &job_id(), 2_000);
 
     assert_eq!(outcome, Outcome::NoJob, "no job file");
     assert!(notes.is_empty(), "nothing worth logging: {notes:?}");
     assert!(
-        spy.spawns.borrow().is_empty(),
+        spy.spawns.borrow().is_empty() && runner.call_count() == 0,
         "nothing should have been run"
+    );
+}
+
+#[test]
+fn clicking_raises_the_terminal_then_focuses_the_pane() {
+    let state = state_for("click_focus");
+    let exchange = SocketExchange::load("pane-focus-ok");
+    let (socket, server) = fake_herdr("ck_ok", &exchange);
+    let id = job_id();
+    state
+        .save_job(&a_job(&id, 9_000, &socket))
+        .expect("save job");
+
+    let runner = Timed::new(opens_ghostty());
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+
+    assert_eq!(
+        outcome,
+        Outcome::Focused {
+            pane_id: "w3:p1".to_owned()
+        },
+        "notes: {notes:?}"
+    );
+    assert!(notes.is_empty(), "nothing went wrong: {notes:?}");
+    assert_eq!(
+        *runner.replay.calls.borrow(),
+        [vec!["/usr/bin/open", "-b", "com.mitchellh.ghostty"]],
+        "open -b should get the job's bundle id"
+    );
+
+    let received = server.join().expect("fake socket");
+    let sent: serde_json::Value = serde_json::from_str(&received.request).expect("request json");
+    assert_eq!(sent["method"], "pane.focus");
+    assert_eq!(sent["params"]["pane_id"], "w3:p1", "the job's pane");
+    assert!(
+        runner.at.borrow()[0] < received.connected_at,
+        "open -b should run before the socket is reached, so the focus change lands in a raised window"
+    );
+}
+
+/// With no terminal resolved there is nothing to raise, but the pane can
+/// still be focused in whatever window Herdr is in.
+#[test]
+fn an_unresolved_terminal_still_focuses_the_pane() {
+    let state = state_for("click_unresolved");
+    let (socket, server) = fake_herdr("ck_unres", &SocketExchange::load("pane-focus-ok"));
+    let id = job_id();
+    let mut job = a_job(&id, 9_000, &socket);
+    job.bundle_id = None;
+    state.save_job(&job).expect("save job");
+
+    let runner = Replay::default();
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::Focused { .. }),
+        "outcome: {outcome:?}, notes: {notes:?}"
+    );
+    assert_eq!(runner.call_count(), 0, "no bundle id, so no open -b");
+    server.join().expect("fake socket");
+}
+
+#[test]
+fn a_failed_open_still_focuses_the_pane() {
+    let state = state_for("click_open_fails");
+    let (socket, server) = fake_herdr("ck_openf", &SocketExchange::load("pane-focus-ok"));
+    let id = job_id();
+    let mut job = a_job(&id, 9_000, &socket);
+    job.bundle_id = Some("io.github.dev.no-such-app".to_owned());
+    state.save_job(&job).expect("save job");
+
+    let runner = Replay::new([Recorded::sys("open-bundle-unknown")]);
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::Focused { .. }),
+        "outcome: {outcome:?}, notes: {notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("LSCopyApplicationURLsForBundleIdentifier")),
+        "open's stderr from sys/open-bundle-unknown should be logged: {notes:?}"
+    );
+    server.join().expect("fake socket");
+}
+
+/// The pane can close while its notification waits in Notification Center.
+#[test]
+fn a_pane_that_has_gone_is_not_focused_but_the_job_is_cleared() {
+    let state = state_for("click_pane_gone");
+    let (socket, server) = fake_herdr("ck_gone", &SocketExchange::load("pane-focus-not-found"));
+    let id = job_id();
+    state
+        .save_job(&a_job(&id, 9_000, &socket))
+        .expect("save job");
+
+    let (outcome, notes) = click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
+
+    assert_eq!(
+        outcome,
+        Outcome::NotFocused {
+            pane_id: "w3:p1".to_owned()
+        }
+    );
+    assert!(
+        notes.iter().any(|n| n.contains("pane_not_found")),
+        "the error code from socket/pane-focus-not-found should be logged: {notes:?}"
+    );
+    assert!(
+        matches!(state.job(&id), Ok(Loaded::Missing)),
+        "the job file should be gone"
+    );
+    server.join().expect("fake socket");
+}
+
+/// Herdr not running is the same as the pane having gone, as far as the
+/// user can tell.
+#[test]
+fn no_herdr_socket_is_not_focused() {
+    let state = state_for("click_no_herdr");
+    let id = job_id();
+    state
+        .save_job(&a_job(&id, 9_000, &no_socket("click_no_herdr")))
+        .expect("save job");
+
+    let (outcome, notes) = click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::NotFocused { .. }),
+        "outcome: {outcome:?}"
+    );
+    assert!(
+        notes.iter().any(|n| n.starts_with("could not focus w3:p1")),
+        "notes: {notes:?}"
+    );
+}
+
+/// Otherwise the terminal we raise would be learned as the workspace's the
+/// next time an event arrives, and Notification Center can still be in
+/// front at that point.
+#[test]
+fn a_click_marks_the_workspace_as_focused_by_us() {
+    let state = state_for("click_marker");
+    let id = job_id();
+    state
+        .save_job(&a_job(&id, 9_000, &no_socket("click_marker")))
+        .expect("save job");
+
+    click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
+
+    let Ok(Loaded::Found(origin)) = state.focus_origin() else {
+        panic!("focus-origin.json should have been written");
+    };
+    assert!(
+        origin.is_recent("w3", 2_000),
+        "workspace w3 should be marked: {origin:?}"
+    );
+    assert!(
+        !origin.is_recent("w1", 2_000),
+        "only the job's workspace should be marked: {origin:?}"
     );
 }
 
@@ -59,11 +259,11 @@ fn clicking_with_no_job_does_nothing() {
 fn clicking_a_live_job_clears_it() {
     let state = state_for("click_live");
     let id = job_id();
-    let job = a_job(&id, 9_000);
+    let job = a_job(&id, 9_000, &no_socket("click_live"));
     state.save_job(&job).expect("save job");
 
     let mut record = PaneRecord::new(
-        "w1:p1",
+        "w3:p1",
         Some("claude"),
         Classification {
             kind: PaneKind::Agent,
@@ -75,18 +275,11 @@ fn clicking_a_live_job_clears_it() {
     state.save_pane_record(&record).expect("save record");
 
     let spy = Spy::default();
-    let (outcome, notes) = click::run(&state, &spy, &id, 2_000);
+    click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
 
     assert_eq!(
-        outcome,
-        Outcome::Cleared {
-            pane_id: "w1:p1".to_owned()
-        },
-        "notes: {notes:?}"
-    );
-    assert_eq!(
         Spy::arg_after(&spy.only(), "-remove").as_deref(),
-        Some("herdr-nudge-w1:p1"),
+        Some("herdr-nudge-w3:p1"),
         "the group should be withdrawn"
     );
     assert_eq!(
@@ -99,7 +292,7 @@ fn clicking_a_live_job_clears_it() {
         "the job file should be gone"
     );
 
-    let Ok(Loaded::Found(after)) = state.pane_record("w1:p1") else {
+    let Ok(Loaded::Found(after)) = state.pane_record("w3:p1") else {
         panic!("the pane record should still be there");
     };
     assert_eq!(after.live_job, None, "live_job should be cleared");
@@ -114,15 +307,26 @@ fn clicking_a_live_job_clears_it() {
 fn clicking_an_expired_job_clears_it_without_focusing() {
     let state = state_for("click_expired");
     let id = job_id();
-    state.save_job(&a_job(&id, 1_500)).expect("save job");
+    state
+        .save_job(&a_job(&id, 1_500, &no_socket("click_expired")))
+        .expect("save job");
 
-    let spy = Spy::default();
-    let (outcome, _) = click::run(&state, &spy, &id, 1_500);
+    let runner = opens_ghostty();
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 1_500);
 
     assert_eq!(
         outcome,
         Outcome::Expired,
         "expiry is inclusive of the deadline"
+    );
+    assert_eq!(
+        runner.call_count(),
+        0,
+        "an expired click should not raise the terminal"
+    );
+    assert!(
+        !notes.iter().any(|n| n.contains("could not focus")),
+        "nothing listens on the socket, so trying to focus would have been logged: {notes:?}"
     );
     assert!(
         matches!(state.job(&id), Ok(Loaded::Missing)),
@@ -135,10 +339,12 @@ fn clicking_an_expired_job_clears_it_without_focusing() {
 fn a_click_leaves_another_panes_live_job_alone() {
     let state = state_for("click_other_pane");
     let id = job_id();
-    state.save_job(&a_job(&id, 9_000)).expect("save job");
+    state
+        .save_job(&a_job(&id, 9_000, &no_socket("click_other_pane")))
+        .expect("save job");
 
     let mut other = PaneRecord::new(
-        "w1:p2",
+        "w3:p2",
         Some("make"),
         Classification {
             kind: PaneKind::Shell,
@@ -149,10 +355,9 @@ fn a_click_leaves_another_panes_live_job_alone() {
     other.live_job = Some("fedcba9876543210".to_owned());
     state.save_pane_record(&other).expect("save record");
 
-    let spy = Spy::default();
-    click::run(&state, &spy, &id, 2_000);
+    click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
 
-    let Ok(Loaded::Found(after)) = state.pane_record("w1:p2") else {
+    let Ok(Loaded::Found(after)) = state.pane_record("w3:p2") else {
         panic!("the other pane's record should still be there");
     };
     assert_eq!(
@@ -215,15 +420,18 @@ fn an_empty_state_dir_variable_falls_through_to_home() {
 #[test]
 fn the_job_is_deleted_even_if_the_notifier_will_not_start() {
     let state = state_for("click_notifier_fails");
+    let (socket, server) = fake_herdr("ck_nfail", &SocketExchange::load("pane-focus-ok"));
     let id = job_id();
-    state.save_job(&a_job(&id, 9_000)).expect("save job");
+    state
+        .save_job(&a_job(&id, 9_000, &socket))
+        .expect("save job");
 
     let spy = Spy::failing();
-    let (outcome, notes) = click::run(&state, &spy, &id, 2_000);
+    let (outcome, notes) = click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
 
     assert!(
-        matches!(outcome, Outcome::Cleared { .. }),
-        "outcome: {outcome:?}"
+        matches!(outcome, Outcome::Focused { .. }),
+        "the pane should still be focused: {outcome:?}"
     );
     assert!(
         notes.iter().any(|n| n.contains("could not remove group")),
@@ -233,4 +441,5 @@ fn the_job_is_deleted_even_if_the_notifier_will_not_start() {
         matches!(state.job(&id), Ok(Loaded::Missing)),
         "the job file should still be deleted"
     );
+    server.join().expect("fake socket");
 }

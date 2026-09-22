@@ -143,7 +143,7 @@ fn run_click(id: &cli::JobId) -> ExitCode {
     };
 
     let system = System::default();
-    let (outcome, notes) = click::run(&state, &system, id, herdr_nudge::state::now_ms());
+    let (outcome, notes) = click::run(&state, &system, &system, id, herdr_nudge::state::now_ms());
     for note in notes {
         eprintln!("herdr-nudge: {note}");
     }

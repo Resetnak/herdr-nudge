@@ -8,7 +8,7 @@ raw/                 probe logs, exactly as tools/probe/dump.sh wrote them
 events/<category>/   one plugin invocation each, generated from raw/
 cli/                 read-only `herdr` queries: argv, exit code, stdout, stderr
 socket/              one Herdr socket request and its reply line
-sys/                 macOS tools (lsappinfo): argv, exit code, output
+sys/                 macOS tools (lsappinfo, open): argv, exit code, output
 ```
 
 Regenerate with `tools/fixtures/extract.py`:
@@ -142,6 +142,8 @@ belong to the probe; tests should override them.
 | `sys/lsappinfo-front` | – | the frontmost app's ASN |
 | `sys/lsappinfo-bundleid-ghostty` | – | that ASN's bundle id |
 | `sys/lsappinfo-bundleid-gone` | – | an app that has quit: `[ NULL ]`, still exit 0 |
+| `sys/open-bundle-ghostty` | – | `open -b` raising the terminal a click goes to: exit 0, no output |
+| `sys/open-bundle-unknown` | – | `open -b` with a bundle id nothing has: exit 1, reason on stderr |
 
 ## Findings (2026-09-18 captures)
 

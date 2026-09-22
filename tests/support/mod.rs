@@ -9,8 +9,11 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use herdr_nudge::context::{Context, Env};
 use herdr_nudge::event::Envelope;
@@ -372,4 +375,57 @@ pub fn scratch_dir(test_name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("creating {}: {e}", dir.display()));
     dir
+}
+
+/// What a [`fake_herdr`] socket was sent.
+pub struct Received {
+    pub request: String,
+    /// For checking what happened before the connection, e.g. `open -b`.
+    pub connected_at: Instant,
+}
+
+/// Starts a socket that reads one request line, answers with `exchange`'s
+/// captured reply, and hands back the request it got.
+///
+/// If nothing connects within 5 s the thread panics, so a test that joins it
+/// fails instead of hanging the whole run.
+///
+/// macOS caps a socket path at 104 bytes, so callers pass a short directory
+/// name rather than the test's name.
+pub fn fake_herdr(
+    test: &str,
+    exchange: &SocketExchange,
+) -> (PathBuf, thread::JoinHandle<Received>) {
+    let path = scratch_dir(test).join("herdr.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let response = exchange.response.clone();
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        listener.set_nonblocking(true).unwrap();
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "nothing connected to the fake socket"
+                    );
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("fake socket accept: {e}"),
+            }
+        };
+        let connected_at = Instant::now();
+        // An accepted socket inherits non-blocking on macOS.
+        stream.set_nonblocking(false).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut request = String::new();
+        reader.read_line(&mut request).unwrap();
+        reader.get_mut().write_all(response.as_bytes()).unwrap();
+        Received {
+            request,
+            connected_at,
+        }
+    });
+    (path, handle)
 }

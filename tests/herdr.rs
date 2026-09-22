@@ -3,14 +3,13 @@
 
 mod support;
 
-use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
 use herdr_nudge::herdr::{self, Cli, Error};
-use support::{Recorded, Replay, SocketExchange, scratch_dir};
+use support::{Recorded, Replay, SocketExchange, fake_herdr, scratch_dir};
 
 const HERDR: &str = "/Users/dev/.local/bin/herdr";
 
@@ -132,29 +131,6 @@ fn agent_manifests_lists_every_agent_label() {
     );
 }
 
-/// Starts a socket that reads one request line, answers with `exchange`'s
-/// captured reply, and hands back the request it got.
-///
-/// macOS caps a socket path at 104 bytes, so callers pass a short directory
-/// name rather than the test's name.
-fn fake_herdr(
-    test: &str,
-    exchange: &SocketExchange,
-) -> (std::path::PathBuf, thread::JoinHandle<String>) {
-    let path = scratch_dir(test).join("herdr.sock");
-    let listener = UnixListener::bind(&path).unwrap();
-    let response = exchange.response.clone();
-    let handle = thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
-        let mut reader = BufReader::new(stream);
-        let mut request = String::new();
-        reader.read_line(&mut request).unwrap();
-        reader.get_mut().write_all(response.as_bytes()).unwrap();
-        request
-    });
-    (path, handle)
-}
-
 #[test]
 fn focus_pane_sends_pane_focus_over_the_socket() {
     let exchange = SocketExchange::load("pane-focus-ok");
@@ -162,7 +138,7 @@ fn focus_pane_sends_pane_focus_over_the_socket() {
 
     herdr::focus_pane(&path, "w3:p1", Duration::from_secs(2)).unwrap();
 
-    let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap()).unwrap();
+    let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap().request).unwrap();
     let captured: serde_json::Value = serde_json::from_str(&exchange.request).unwrap();
     assert_eq!(sent["method"], captured["method"]);
     assert_eq!(sent["params"], captured["params"]);
@@ -190,7 +166,7 @@ fn focus_pane_encodes_the_pane_id() {
     let odd = "w1:p1\",\"method\":\"server.stop";
     let _ = herdr::focus_pane(&path, odd, Duration::from_secs(2));
 
-    let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap()).unwrap();
+    let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap().request).unwrap();
     assert_eq!(sent["method"], "pane.focus");
     assert_eq!(sent["params"]["pane_id"], odd);
 }
