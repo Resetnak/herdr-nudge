@@ -1,0 +1,18 @@
+id = "herdr-nudge"
+name = "Herdr Nudge"
+version = "0.1.0"
+description = "macOS notifications when an agent or a long shell command needs you"
+min_herdr_version = "0.9.0"
+platforms = ["macos"]
+
+# Points at a local release build until there is a shipped binary.
+[[startup]]
+command = ["./target/release/herdr-nudge", "--cleanup"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["./target/release/herdr-nudge"]
+
+[[events]]
+on = "pane.closed"
+command = ["./target/release/herdr-nudge"]

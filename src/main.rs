@@ -13,6 +13,9 @@ fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
         Ok(Mode::Event) => run_event(),
         Ok(Mode::Click(id)) => run_click(&id),
+        // Herdr runs this as the startup hook, and a non-zero exit shows up
+        // as a failed plugin. Nothing to clean up yet.
+        Ok(Mode::Cleanup) => ExitCode::SUCCESS,
         Ok(Mode::Help) => {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
