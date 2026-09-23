@@ -13,9 +13,7 @@ fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
         Ok(Mode::Event) => run_event(),
         Ok(Mode::Click(id)) => run_click(&id),
-        // Herdr runs this as the startup hook, and a non-zero exit shows up
-        // as a failed plugin. Nothing to clean up yet.
-        Ok(Mode::Cleanup) => ExitCode::SUCCESS,
+        Ok(Mode::Cleanup) => run_cleanup(),
         Ok(Mode::Help) => {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
@@ -120,20 +118,40 @@ fn run_event() -> ExitCode {
         pid: std::process::id(),
     };
 
-    let (swept, notes) = handler::sweep_expired(&state, &system, deps.now_ms);
-    for note in notes {
-        eprintln!("herdr-nudge: {note}");
-    }
-    if !swept.is_empty() {
-        eprintln!("herdr-nudge: swept {} expired job(s)", swept.len());
-    }
-
     let report = handler::handle(&deps, &envelope, ctx.as_ref());
     for note in report.notes {
         eprintln!("herdr-nudge: {note}");
     }
     eprintln!("herdr-nudge: {:?}", report.outcome);
 
+    ExitCode::SUCCESS
+}
+
+/// Herdr's startup hook. Exits 0 whatever happens, like an event.
+///
+/// The startup hook gets `HERDR_PLUGIN_STATE_DIR` and `HERDR_BIN_PATH`
+/// (seen on 0.9.1). Neither is required: the state directory has a fallback,
+/// and without `herdr` the jobs still go.
+fn run_cleanup() -> ExitCode {
+    let Some(state) = StateDir::locate(|name| std::env::var(name).ok()) else {
+        eprintln!("herdr-nudge: no HOME, cannot find the state directory");
+        return ExitCode::SUCCESS;
+    };
+    let herdr_bin = std::env::var_os("HERDR_BIN_PATH")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    let system = System::default();
+    let notes = handler::cleanup(
+        &state,
+        herdr_bin.as_deref(),
+        &system,
+        &system,
+        herdr_nudge::state::now_ms(),
+    );
+    for note in notes {
+        eprintln!("herdr-nudge: {note}");
+    }
+    eprintln!("herdr-nudge: --cleanup done");
     ExitCode::SUCCESS
 }
 

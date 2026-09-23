@@ -6,9 +6,9 @@
 //! [`click_command`] and can only ever be our own binary path plus a job id
 //! we generated — no event data goes near it.
 //!
-//! Nothing here waits. Herdr runs an event hook synchronously and waits for
-//! it, so the notifier is started and left alone; that is why posting takes a
-//! [`Spawner`] and not a `Runner`.
+//! Nothing here waits: the notifier is started and left alone, which is why
+//! posting takes a [`Spawner`] and not a `Runner`. There is nothing to wait
+//! for: a click comes back later as a new process running `--click`.
 
 use std::fmt;
 use std::path::{Path, PathBuf};

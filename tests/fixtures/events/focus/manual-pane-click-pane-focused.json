@@ -1,10 +1,10 @@
 {
-  "source": "tests/fixtures/raw/events-2026-09-20-socket-focus.log:4",
-  "herdr_version": "0.9.0",
-  "captured_at": "12:07:18",
-  "provenance": "programmatic",
-  "mark": "[programmatic] socket pane.focus w3:p2 then w3:p1 (FR-6.1 check)",
-  "why": "socket pane.focus (the call FR-5.1 makes) emits pane.focused, so FR-6.1's dismiss trigger fires",
+  "source": "tests/fixtures/raw/events-2026-09-23-herdr-0.9.1.log:174",
+  "herdr_version": "0.9.1",
+  "captured_at": "10:25:08",
+  "provenance": "manual",
+  "mark": "[manual] navigation round: w3:t1 -> w3:t5 -> w3:t1, w3:p1 -> w3:p2 -> w3:p1, w3 -> w1 -> w3, about 3 s apart",
+  "why": "User clicked the other pane in the same tab: pane.focused",
   "event": "pane.focused",
   "event_json": "{\"event\":\"pane_focused\",\"data\":{\"type\":\"pane_focused\",\"pane_id\":\"w3:p2\",\"workspace_id\":\"w3\"}}",
   "env": {

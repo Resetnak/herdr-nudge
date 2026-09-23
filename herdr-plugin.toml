@@ -16,3 +16,9 @@ command = ["./target/release/herdr-nudge"]
 [[events]]
 on = "pane.closed"
 command = ["./target/release/herdr-nudge"]
+
+# Herdr 0.9.1 sends this when the user moves to a pane by hand; 0.9.0 only
+# for focus asked for through the API.
+[[events]]
+on = "pane.focused"
+command = ["./target/release/herdr-nudge"]

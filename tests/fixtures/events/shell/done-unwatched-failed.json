@@ -1,5 +1,6 @@
 {
   "source": "tests/fixtures/raw/events-2026-09-18-gaps.log:94",
+  "herdr_version": "0.9.0",
   "captured_at": "22:32:26",
   "provenance": "programmatic",
   "mark": "gap6: shell reporter on w3:p3 (unfocused tab w3:t2): working, metadata idle=failed, idle",

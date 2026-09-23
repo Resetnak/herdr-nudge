@@ -50,6 +50,15 @@ pub struct Resolution {
     pub showing: BTreeSet<String>,
 }
 
+impl Resolution {
+    /// Whether one of the terminals Herdr is shown in is the frontmost app.
+    /// Asks `lsappinfo` only when there is a terminal to compare with.
+    pub fn in_front(&self, runner: &impl Runner) -> bool {
+        !self.showing.is_empty()
+            && frontmost_bundle_id(runner).is_some_and(|front| self.showing.contains(&front))
+    }
+}
+
 /// `default_terminal` if set, otherwise the terminal of whichever attached
 /// client the user was in last.
 ///

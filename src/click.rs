@@ -79,7 +79,8 @@ pub fn run<R: Runner, S: Spawner>(
 
     // Cleared before focusing, not after, so a focus that fails still leaves
     // nothing behind. The banner is gone either way, so there is nothing to
-    // retry from.
+    // retry from. It also means the `pane.focused` our own focus causes
+    // finds no job to withdraw.
     clear(state, spawner, &job, &mut notes);
 
     // Looked for again because the notification can be an hour old, and the

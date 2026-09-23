@@ -28,6 +28,9 @@ pub struct Fixture {
     pub name: String,
     /// Where this was captured from: `tests/fixtures/raw/<log>:<line>`.
     pub source: String,
+    /// The Herdr that sent it, `0.9.0` or `0.9.1`. They differ: 0.9.0 sent
+    /// no focus events for manual navigation, 0.9.1 does.
+    pub herdr_version: String,
     pub captured_at: String,
     /// `manual`, `programmatic` or `unknown`. The two don't always behave
     /// the same, so a programmatic capture says nothing about manual use.

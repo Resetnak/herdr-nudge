@@ -66,7 +66,6 @@ fn a_job(id: &JobId, expires_at_ms: u64, socket_path: &Path) -> Job {
         ),
         created_at_ms: 1_000,
         expires_at_ms,
-        repeat_after_ms: 0,
     }
 }
 

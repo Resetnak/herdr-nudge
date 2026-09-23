@@ -1,5 +1,6 @@
 {
   "source": "tests/fixtures/raw/events-2026-09-18.log:40",
+  "herdr_version": "0.9.0",
   "captured_at": "17:25:46",
   "provenance": "programmatic",
   "mark": null,

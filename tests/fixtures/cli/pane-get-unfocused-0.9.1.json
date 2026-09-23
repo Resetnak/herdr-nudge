@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "pane",
+    "get",
+    "w3:p9"
+  ],
+  "captured_at": "2026-09-23T10:36:48",
+  "herdr_version": "herdr 0.9.1",
+  "exit_code": 0,
+  "stdout": "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":{\"agent\":\"make\",\"agent_status\":\"idle\",\"cwd\":\"/Users/dev/Developer/herdr-nudge\",\"focused\":false,\"foreground_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"pane_id\":\"w3:p9\",\"revision\":1,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":59},\"state_labels\":{\"idle\":\"done\"},\"tab_id\":\"w3:t5\",\"terminal_id\":\"term_65c29ae22010c9\",\"terminal_title\":\"dev@dev-mac:~/Developer/herdr-nudge\",\"terminal_title_stripped\":\"dev@dev-mac:~/Developer/herdr-nudge\",\"title\":\"make test · exit 0 · 2m11s\",\"workspace_id\":\"w3\"},\"type\":\"pane_info\"}}\n",
+  "stderr": ""
+}

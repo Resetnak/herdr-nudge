@@ -416,9 +416,9 @@ fn default_terminal_leaves_the_click_nothing_to_detect() {
     );
 }
 
-/// A repeat of what is already showing costs no process scan.
+/// A repeat of what is already showing costs no subprocess at all.
 #[test]
-fn a_repeat_is_caught_before_looking_for_clients() {
+fn a_repeat_is_caught_before_asking_anything() {
     let mut harness = with_two_terminals(
         "client_repeat",
         "pane-get-unfocused",
@@ -436,8 +436,8 @@ fn a_repeat_is_caught_before_looking_for_clients() {
     ));
     assert_eq!(
         harness.runner.call_count(),
-        before + 1,
-        "the repeat should only run pane get: {:?}",
+        before,
+        "the repeat ran: {:?}",
         &harness.runner.calls.borrow()[before..]
     );
 }
@@ -578,8 +578,13 @@ fn an_expired_job_is_swept_and_its_banner_withdrawn() {
     };
     harness.spy.spawns.borrow_mut().clear();
 
-    let (swept, _) = handler::sweep_expired(&harness.state, &harness.spy, harness.now_ms + 1);
-    assert_eq!(swept, vec![posted.job_id.clone()], "the expired job");
+    let live = handler::live_jobs(
+        &harness.state,
+        &harness.spy,
+        harness.now_ms + 1,
+        &mut Vec::new(),
+    );
+    assert!(live.is_empty(), "an expired job came back as live");
     assert_eq!(
         Spy::arg_after(&harness.spy.only(), "-remove").as_deref(),
         Some("herdr-nudge-w1:p1"),
@@ -600,10 +605,16 @@ fn a_live_job_is_left_alone_by_the_sweep() {
     };
     harness.spy.spawns.borrow_mut().clear();
 
-    let (swept, _) = handler::sweep_expired(&harness.state, &harness.spy, harness.now_ms);
+    let live = handler::live_jobs(
+        &harness.state,
+        &harness.spy,
+        harness.now_ms,
+        &mut Vec::new(),
+    );
+    assert_eq!(live.len(), 1, "the live job");
     assert!(
-        swept.is_empty(),
-        "swept a job that has not expired: {swept:?}"
+        harness.spy.spawns.borrow().is_empty(),
+        "withdrew a job that has not expired"
     );
     assert!(
         matches!(harness.state.job(&posted.job_id), Ok(Loaded::Found(_))),
@@ -611,15 +622,20 @@ fn a_live_job_is_left_alone_by_the_sweep() {
     );
 }
 
-/// Events other than a status change do nothing yet.
+/// We subscribe to three events. Anything else Herdr sends does nothing.
 #[test]
-fn other_events_are_not_handled_yet() {
+fn events_we_do_not_subscribe_to_are_not_handled() {
     let harness = Harness::new("other_events", Vec::new());
-    for fixture in ["lifecycle/pane-closed", "focus/tab-focus-pane-focused"] {
+    for fixture in [
+        "focus/tab-focus-tab-focused",
+        "focus/manual-tab-click-workspace-focused",
+        "detected/shell-claim",
+        "lifecycle/pane-created",
+    ] {
         assert_eq!(
             harness.handle(fixture),
             Outcome::NotHandled,
-            "{fixture} is not a status change, so nothing should happen"
+            "{fixture} should do nothing"
         );
     }
 }
@@ -671,106 +687,23 @@ fn job_ids_are_sixteen_hex_and_differ_between_events() {
     }
 }
 
-/// The dedup window is there to swallow a repeat of the same status, which
-/// arrives because reporting metadata alone emits one.
+/// An expired job is swept before the repeat check, so it can't swallow
+/// the same status arriving again.
 #[test]
-fn a_repeat_within_the_window_is_suppressed() {
-    let harness = Harness::answering("dedup_window", "w1:p1", "pane-get-unfocused");
+fn an_expired_job_does_not_block_a_repeat() {
+    let mut harness = Harness::answering("expired_repeat", "w1:p1", "pane-get-unfocused");
+    harness.config.notifications.clickable_secs = 0;
     harness.remember_agents(&["claude"]);
     assert!(matches!(
         harness.handle("agent/blocked"),
         Outcome::Posted(_)
     ));
 
-    let again = harness.handle("agent/blocked");
-    assert!(
-        matches!(again, Outcome::AlreadyShowing(_)),
-        "a repeat straight away should be suppressed: {again:?}"
-    );
-}
-
-/// Dismissing a banner tells us nothing, so the window has to let go long
-/// before the notification stops being clickable — otherwise a swipe silences
-/// the pane for the rest of the hour.
-#[test]
-fn a_repeat_after_the_window_posts_again_while_still_clickable() {
-    let mut harness = Harness::answering("dedup_expires", "w1:p1", "pane-get-unfocused");
-    harness.remember_agents(&["claude"]);
-
-    let Outcome::Posted(first) = harness.handle("agent/blocked") else {
-        panic!("the first agent/blocked did not post");
-    };
-    let Ok(Loaded::Found(job)) = harness.state.job(&first.job_id) else {
-        panic!("no job file");
-    };
-
-    harness.now_ms = job.repeat_after_ms;
-    assert!(
-        !job.is_expired(harness.now_ms),
-        "the notification should still be clickable at this point"
-    );
-
+    harness.now_ms += 1;
     let again = harness.handle("agent/blocked");
     assert!(
         matches!(again, Outcome::Posted(_)),
-        "once the window passes the same status should notify again: {again:?}"
-    );
-}
-
-/// The window is much shorter than the clickable lifetime, which is the whole
-/// point of it being a separate deadline.
-#[test]
-fn the_dedup_window_is_far_shorter_than_the_clickable_lifetime() {
-    let harness = Harness::answering("dedup_shorter", "w1:p1", "pane-get-unfocused");
-    harness.remember_agents(&["claude"]);
-    let Outcome::Posted(posted) = harness.handle("agent/blocked") else {
-        panic!("agent/blocked did not post");
-    };
-    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
-        panic!("no job file");
-    };
-    assert!(
-        job.repeat_after_ms < job.expires_at_ms,
-        "repeat_after_ms {} should be well before expires_at_ms {}",
-        job.repeat_after_ms,
-        job.expires_at_ms
-    );
-}
-
-/// An expired job blocks nothing, however its window was set.
-#[test]
-fn an_expired_job_never_blocks_a_repeat() {
-    let job_at = |repeat_after_ms, expires_at_ms| herdr_nudge::state::Job {
-        version: herdr_nudge::state::VERSION,
-        id: "0123456789abcdef".to_owned(),
-        pane_id: "w1:p1".to_owned(),
-        workspace_id: "w1".to_owned(),
-        agent_label: None,
-        kind: PaneKind::Agent,
-        status: AgentStatus::Blocked,
-        group: "g".to_owned(),
-        bundle_id: None,
-        detect_at_click: false,
-        socket_path: PathBuf::new(),
-        notifier_path: PathBuf::new(),
-        created_at_ms: 0,
-        expires_at_ms,
-        repeat_after_ms,
-    };
-
-    assert!(
-        !job_at(9_000, 1_000).blocks_repeat(2_000),
-        "an expired job should not block a repeat even mid-window"
-    );
-    assert!(
-        job_at(9_000, 99_000).blocks_repeat(2_000),
-        "a live job inside its window should block"
-    );
-    // A job written before the field existed reads as 0, which blocks
-    // nothing — err towards notifying.
-    assert!(
-        !job_at(0, 99_000).blocks_repeat(2_000),
-        "a job with no window should block nothing"
+        "agent/blocked after its job expired: {again:?}"
     );
 }
 
@@ -811,6 +744,11 @@ fn a_handover_leaves_one_job_for_the_pane() {
         agent_job.group, shell_job.group,
         "both notifications share the pane's group, which is why the old job had to go"
     );
+    assert_eq!(
+        removes(&harness.spy),
+        Vec::<String>::new(),
+        "the new banner replaced the old one, so nothing should be withdrawn"
+    );
 }
 
 /// If the notifier never starts there is nothing on screen, so the job must
@@ -849,5 +787,441 @@ fn a_failed_post_does_not_suppress_the_next_event() {
     assert!(
         matches!(second, Outcome::Posted(_)),
         "the retry should post rather than dedupe: {second:?}"
+    );
+}
+
+/// The groups of every `-remove` the notifier was started with, in order.
+fn removes(spy: &Spy) -> Vec<String> {
+    spy.spawns
+        .borrow()
+        .iter()
+        .filter_map(|argv| Spy::arg_after(argv, "-remove"))
+        .collect()
+}
+
+fn posts(spy: &Spy) -> usize {
+    spy.spawns
+        .borrow()
+        .iter()
+        .filter(|argv| argv.iter().any(|a| a == "-execute"))
+        .count()
+}
+
+/// A captured event moved to another pane.
+fn on_pane(fixture: &str, pane_id: &str) -> Envelope {
+    let json = Fixture::load(fixture).event_json_with("pane_id", pane_id.into());
+    Envelope::parse(&json).expect("retargeted fixture parses")
+}
+
+/// `pane get <pane_id>` answered from `recording`, plus whatever else.
+fn pane_get(pane_id: &str, recording: &str) -> Recorded {
+    let mut pane_get = Recorded::cli(recording);
+    pane_get.argv = ["herdr", "pane", "get", pane_id]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    pane_get
+}
+
+/// `lsappinfo` saying `bundle_id` is in front.
+fn front(bundle_id: &str) -> [Recorded; 2] {
+    let mut info = Recorded::sys("lsappinfo-bundleid-ghostty");
+    info.stdout = format!("\"CFBundleIdentifier\"=\"{bundle_id}\"\n");
+    [Recorded::sys("lsappinfo-front"), info]
+}
+
+/// A Claude `blocked` banner up for `pane_id`, with Ghostty as the terminal.
+fn blocked_on(test_name: &str, pane_id: &str) -> Harness {
+    let mut harness = Harness::answering(test_name, pane_id, "pane-get-unfocused");
+    harness.config.default_terminal = Some("com.mitchellh.ghostty".to_owned());
+    harness.remember_agents(&["claude"]);
+    let outcome = harness.handle_envelope(&on_pane("agent/blocked", pane_id));
+    assert!(
+        matches!(outcome, Outcome::Posted(_)),
+        "agent/blocked on {pane_id}: {outcome:?}"
+    );
+    harness.now_ms += 1_000;
+    harness
+}
+
+/// The case that used to be swallowed: the user answers a `blocked` prompt
+/// in the terminal, the agent works, and then blocks again. The second
+/// `blocked` is new and has to notify.
+#[test]
+fn a_status_after_the_pane_moved_on_posts_again() {
+    let mut harness = blocked_on("blocked_working_blocked", "w1:p1");
+
+    assert_eq!(
+        harness.handle("agent/working"),
+        Outcome::StatusNotWatched(AgentStatus::Working),
+        "agent/working"
+    );
+    assert_eq!(
+        removes(&harness.spy),
+        vec!["herdr-nudge-w1:p1"],
+        "agent/working should withdraw the blocked banner"
+    );
+    assert_eq!(
+        harness.state.job_ids().unwrap(),
+        Vec::new(),
+        "agent/working should delete the blocked job"
+    );
+
+    harness.now_ms += 1_000;
+    let again = harness.handle("agent/blocked");
+    assert!(
+        matches!(again, Outcome::Posted(_)),
+        "agent/blocked after working: {again:?}"
+    );
+    assert_eq!(posts(&harness.spy), 2, "two blocked banners");
+}
+
+/// `working` arrives many times a minute, so taking a banner down on it
+/// must not ask Herdr anything.
+#[test]
+fn moving_on_withdraws_without_a_query() {
+    let harness = blocked_on("withdraw_no_query", "w1:p1");
+    let before = harness.runner.call_count();
+    harness.handle("agent/working");
+    assert_eq!(
+        harness.runner.call_count(),
+        before,
+        "agent/working ran: {:?}",
+        &harness.runner.calls.borrow()[before..]
+    );
+}
+
+#[test]
+fn a_status_on_another_pane_leaves_the_banner_alone() {
+    let harness = blocked_on("other_pane_status", "w1:p1");
+    harness.handle_envelope(&on_pane("agent/working", "w1:p9"));
+    assert_eq!(
+        removes(&harness.spy),
+        Vec::<String>::new(),
+        "agent/working on w1:p9 withdrew w1:p1's banner"
+    );
+    assert_eq!(harness.state.job_ids().unwrap().len(), 1, "w1:p1's job");
+}
+
+/// `done` replaces `blocked` in the same group. A `-remove` as well could
+/// reach the notifier after the post and take the new banner down.
+#[test]
+fn a_new_banner_replaces_the_old_one_without_a_remove() {
+    let harness = blocked_on("blocked_then_done_replace", "w1:p1");
+    let Outcome::Posted(done) = harness.handle("agent/done") else {
+        panic!("agent/done after blocked did not post");
+    };
+    assert_eq!(
+        removes(&harness.spy),
+        Vec::<String>::new(),
+        "agent/done should replace, not withdraw"
+    );
+    assert_eq!(
+        harness.state.job_ids().unwrap(),
+        vec![done.job_id],
+        "only the done job should be left"
+    );
+}
+
+/// The agent exited. The event after a release has no `agent` field.
+#[test]
+fn a_release_withdraws_the_agents_banner() {
+    let harness = blocked_on("release_withdraws", "w1:p1");
+    let outcome = harness.handle_envelope(&on_pane("agent/status-unknown-no-agent-field", "w1:p1"));
+    assert_eq!(outcome, Outcome::StatusNotWatched(AgentStatus::Unknown));
+    assert_eq!(removes(&harness.spy), vec!["herdr-nudge-w1:p1"]);
+    assert_eq!(harness.state.job_ids().unwrap(), Vec::new());
+}
+
+/// A new status that doesn't post still means the old banner is out of date.
+#[test]
+fn a_status_the_user_is_watching_withdraws_the_old_banner() {
+    let mut harness = blocked_on("watching_withdraws", "w1:p1");
+    let [lsappinfo_front, info] = front("com.mitchellh.ghostty");
+    harness.runner = Replay::new([pane_get("w1:p1", "pane-get-focused"), lsappinfo_front, info]);
+    assert_eq!(harness.handle("agent/done"), Outcome::Watching);
+    assert_eq!(removes(&harness.spy), vec!["herdr-nudge-w1:p1"]);
+    assert_eq!(harness.state.job_ids().unwrap(), Vec::new());
+}
+
+/// 0.9.0 closed an agent pane by hand, 0.9.1 by `herdr pane close`. Both
+/// send the same `pane.closed`.
+#[test]
+fn closing_a_pane_withdraws_its_banner() {
+    for (fixture, pane_id) in [
+        ("lifecycle/pane-closed", "w1:p1"),
+        ("lifecycle/pane-closed-by-cli", "w3:pA"),
+    ] {
+        let harness = blocked_on("close_withdraws", pane_id);
+        let before = harness.runner.call_count();
+        assert_eq!(
+            harness.handle(fixture),
+            Outcome::Withdrawn(format!("herdr-nudge-{pane_id}")),
+            "{fixture}"
+        );
+        assert_eq!(
+            removes(&harness.spy),
+            vec![format!("herdr-nudge-{pane_id}")],
+            "{fixture}: -remove"
+        );
+        assert_eq!(
+            harness.state.job_ids().unwrap(),
+            Vec::new(),
+            "{fixture}: jobs left"
+        );
+        assert_eq!(
+            harness.runner.call_count(),
+            before,
+            "{fixture} ran something"
+        );
+    }
+}
+
+#[test]
+fn closing_a_pane_with_nothing_up_does_nothing() {
+    let harness = blocked_on("close_other_pane", "w1:p9");
+    assert_eq!(
+        harness.handle("lifecycle/pane-closed"),
+        Outcome::NothingShowing
+    );
+    assert_eq!(removes(&harness.spy), Vec::<String>::new());
+    assert_eq!(harness.state.job_ids().unwrap().len(), 1, "w1:p9's job");
+}
+
+/// 0.9.1 sends `pane.focused` when the user clicks their way to a pane.
+#[test]
+fn going_to_the_pane_withdraws_its_banner() {
+    let mut harness = blocked_on("focus_withdraws", "w3:p9");
+    harness.runner = Replay::new(front("com.mitchellh.ghostty"));
+    assert_eq!(
+        harness.handle("focus/manual-tab-click-pane-focused"),
+        Outcome::Withdrawn("herdr-nudge-w3:p9".to_owned())
+    );
+    assert_eq!(removes(&harness.spy), vec!["herdr-nudge-w3:p9"]);
+    assert_eq!(harness.state.job_ids().unwrap(), Vec::new());
+}
+
+/// Focus moved while the user is in another app, as a script would do it.
+/// Nobody saw the pane, so the banner stays.
+#[test]
+fn focus_while_another_app_is_in_front_leaves_the_banner() {
+    let mut harness = blocked_on("focus_unseen", "w3:p9");
+    harness.runner = Replay::new(front("com.apple.Safari"));
+    assert_eq!(
+        harness.handle("focus/manual-tab-click-pane-focused"),
+        Outcome::FocusedUnseen
+    );
+    assert_eq!(removes(&harness.spy), Vec::<String>::new());
+    assert_eq!(harness.state.job_ids().unwrap().len(), 1, "w3:p9's job");
+}
+
+/// Without `default_terminal`, any client's terminal in front counts, as it
+/// does for `Watching`.
+#[test]
+fn focus_with_any_client_terminal_in_front_withdraws() {
+    let harness = with_two_terminals(
+        "focus_client_terminal",
+        "pane-get-unfocused",
+        "com.googlecode.iterm2",
+    );
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::Posted(_)
+    ));
+    let outcome = harness.handle_envelope(&on_pane("focus/manual-tab-click-pane-focused", "w1:p1"));
+    assert_eq!(outcome, Outcome::Withdrawn("herdr-nudge-w1:p1".to_owned()));
+}
+
+/// Every focus Herdr sends goes through here, including the one our own
+/// click causes, after the click has deleted the job. With nothing up it
+/// must cost nothing.
+#[test]
+fn focus_on_a_pane_with_nothing_up_costs_nothing() {
+    let harness = Harness::new("focus_nothing", Vec::new());
+    for fixture in [
+        "focus/socket-pane-focus-pane-focused",
+        "focus/socket-pane-focus-moved-pane-focused",
+        "focus/manual-tab-click-pane-focused",
+        "focus/manual-pane-click-pane-focused",
+        "focus/manual-workspace-click-pane-focused",
+    ] {
+        assert_eq!(
+            harness.handle(fixture),
+            Outcome::NothingShowing,
+            "{fixture}"
+        );
+    }
+    assert_eq!(
+        harness.runner.call_count(),
+        0,
+        "a focus event ran something"
+    );
+    assert!(
+        harness.spy.spawns.borrow().is_empty(),
+        "a focus event started the notifier"
+    );
+}
+
+/// Installed into a Herdr that is already running, the startup hook hasn't
+/// run, so there is no agent list yet. The first event that needs one
+/// fetches it, and it is kept for the next.
+#[test]
+fn a_missing_agent_list_is_fetched_and_kept() {
+    let mut harness = Harness::new("lazy_agents", Vec::new());
+    harness.runner = Replay::new([
+        pane_get("w1:p1", "pane-get-unfocused"),
+        Recorded::cli("agent-manifests-0.9.1"),
+    ]);
+    let Outcome::Posted(posted) = harness.handle("agent/blocked") else {
+        panic!("agent/blocked with no agent list did not post");
+    };
+    assert_eq!(
+        posted.signal,
+        ClassifySignal::Catalogue,
+        "claude is in agent-manifests-0.9.1"
+    );
+    let Ok(Loaded::Found(cache)) = harness.state.agents_cache() else {
+        panic!("the fetched list was not saved");
+    };
+    assert!(cache.agents.contains("letta"), "0.9.1's list: {cache:?}");
+
+    harness.now_ms += 1_000;
+    let before = harness.runner.call_count();
+    harness.handle("agent/done");
+    let fetches = harness.runner.calls.borrow()[before..]
+        .iter()
+        .filter(|argv| argv.iter().any(|a| a == "agent-manifests"))
+        .count();
+    assert_eq!(fetches, 0, "the second event fetched the list again");
+}
+
+#[test]
+fn cleanup_drops_every_job_and_refreshes_the_agent_list() {
+    let mut harness = blocked_on("cleanup", "w1:p1");
+    harness.handle_envelope(&on_pane("agent/blocked", "w2:p1"));
+    // A job that doesn't parse can't be withdrawn. `read_json` renames it
+    // aside, so it stops counting as a job.
+    let stray = JobId::parse("00000000000000ff").unwrap();
+    fs::write(harness.state.job_path(&stray), b"{").unwrap();
+    harness.spy.spawns.borrow_mut().clear();
+    harness.runner = Replay::new([Recorded::cli("agent-manifests-0.9.1")]);
+
+    let notes = handler::cleanup(
+        &harness.state,
+        Some(&harness.herdr_bin),
+        &harness.runner,
+        &harness.spy,
+        harness.now_ms + 1,
+    );
+
+    assert_eq!(harness.state.job_ids().unwrap(), Vec::new(), "{notes:?}");
+    let aside = fs::read_dir(harness.state.jobs_dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("00000000000000ff.json.corrupt-")
+        });
+    assert!(aside, "the unparseable job should have been renamed aside");
+    assert_eq!(
+        removes(&harness.spy),
+        vec!["herdr-nudge-w1:p1", "herdr-nudge-w2:p1"],
+        "{notes:?}"
+    );
+    let Ok(Loaded::Found(cache)) = harness.state.agents_cache() else {
+        panic!("no agent list after cleanup: {notes:?}");
+    };
+    assert!(cache.agents.contains("letta"), "0.9.1's list: {cache:?}");
+}
+
+#[test]
+fn cleanup_without_herdr_still_drops_jobs() {
+    let harness = blocked_on("cleanup_no_herdr", "w1:p1");
+    let notes = handler::cleanup(
+        &harness.state,
+        None,
+        &harness.runner,
+        &harness.spy,
+        harness.now_ms + 1,
+    );
+    assert_eq!(harness.state.job_ids().unwrap(), Vec::new(), "{notes:?}");
+    assert_eq!(removes(&harness.spy), vec!["herdr-nudge-w1:p1"]);
+}
+
+/// A restored pane's first status event can post while the startup hook is
+/// still running. That banner belongs to the new server and has to stay.
+#[test]
+fn cleanup_keeps_a_job_posted_after_it_started() {
+    let harness = blocked_on("cleanup_keeps_new", "w1:p1");
+    // blocked_on posted the job, then moved the clock on by a second. So a
+    // cleanup that started at that second saw the job posted during it.
+    let started = harness.now_ms - 1_000;
+    let notes = handler::cleanup(&harness.state, None, &harness.runner, &harness.spy, started);
+    assert_eq!(harness.state.job_ids().unwrap().len(), 1, "{notes:?}");
+    assert_eq!(removes(&harness.spy), Vec::<String>::new(), "{notes:?}");
+}
+
+/// A status event with no `agent` field gets its label from `pane get`, and
+/// the job stores that one. The same event again is still a repeat.
+#[test]
+fn a_repeat_without_its_own_label_is_still_a_repeat() {
+    let mut harness =
+        Harness::answering("repeat_no_label", "w3:p3", "pane-get-reported-no-session");
+    let json = Fixture::load("shell/done-unwatched-failed").event_json_with_null("agent");
+    let event = Envelope::parse(&json).expect("fixture with agent nulled parses");
+
+    let Outcome::Posted(posted) = harness.handle_envelope(&event) else {
+        panic!("shell/done-unwatched-failed without agent did not post");
+    };
+    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
+        panic!("no job file");
+    };
+    assert_eq!(
+        job.agent_label.as_deref(),
+        Some("make"),
+        "label from pane get"
+    );
+
+    harness.now_ms += 1_000;
+    assert_eq!(
+        harness.handle_envelope(&event),
+        Outcome::AlreadyShowing(posted.job_id.to_string()),
+        "the same event again"
+    );
+}
+
+/// An expired job left over next to a live one for the same pane shares its
+/// group. Sweeping it must not take the live banner down.
+#[test]
+fn sweeping_a_leftover_leaves_the_live_banner_up() {
+    let mut harness = blocked_on("sweep_leftover", "w1:p1");
+    let ids = harness.state.job_ids().unwrap();
+    let Ok(Loaded::Found(mut old)) = harness.state.job(&ids[0]) else {
+        panic!("no job for w1:p1");
+    };
+    old.id = "0000000000000001".to_owned();
+    old.created_at_ms -= 10_000;
+    old.expires_at_ms = harness.now_ms - 1;
+    harness.state.save_job(&old).unwrap();
+    harness.spy.spawns.borrow_mut().clear();
+    harness.now_ms += 1;
+
+    let live = handler::live_jobs(
+        &harness.state,
+        &harness.spy,
+        harness.now_ms,
+        &mut Vec::new(),
+    );
+    assert_eq!(live.len(), 1, "the live job");
+    assert_eq!(
+        removes(&harness.spy),
+        Vec::<String>::new(),
+        "a -remove would take the live banner"
+    );
+    assert_eq!(
+        harness.state.job_ids().unwrap(),
+        ids,
+        "only the live job left"
     );
 }

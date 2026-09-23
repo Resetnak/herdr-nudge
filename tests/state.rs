@@ -280,6 +280,25 @@ fn a_corrupt_job_is_moved_aside() {
     );
 }
 
+/// Jobs written by an earlier build carry a `repeat_after_ms` that is no
+/// longer read. They are still clickable for up to an hour after an upgrade,
+/// so they have to keep loading.
+#[test]
+fn a_job_with_a_field_we_dropped_still_loads() {
+    let state = StateDir::new(scratch_dir("job_extra_field"));
+    let id = JobId::parse("0123456789abcdef").unwrap();
+    state.save_job(&job(&id)).unwrap();
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&fs::read(state.job_path(&id)).unwrap()).unwrap();
+    json["repeat_after_ms"] = 5_000.into();
+    fs::write(state.job_path(&id), json.to_string()).unwrap();
+
+    let Ok(Loaded::Found(loaded)) = state.job(&id) else {
+        panic!("a job with repeat_after_ms in it did not load");
+    };
+    assert_eq!(loaded, job(&id), "the job, minus repeat_after_ms");
+}
+
 #[test]
 fn a_job_id_is_the_file_name() {
     let state = StateDir::new(Path::new("/state"));
@@ -307,6 +326,5 @@ fn job(id: &JobId) -> Job {
         notifier_path: std::path::PathBuf::from("/plugin/notifier"),
         created_at_ms: 1_000,
         expires_at_ms: 9_000,
-        repeat_after_ms: 0,
     }
 }

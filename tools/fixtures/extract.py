@@ -91,6 +91,16 @@ def scrub():
 # "unknown" = the log doesn't say. Manual and programmatic have been seen to
 # behave differently, so never let one stand in for the other.
 #
+# The Herdr that wrote each raw log. Behaviour has changed between versions
+# (0.9.0 sent no focus events for manual navigation, 0.9.1 does), so every
+# fixture says which one it came from.
+HERDR_VERSIONS = {
+    "events-2026-09-18.log": "0.9.0",
+    "events-2026-09-18-gaps.log": "0.9.0",
+    "events-2026-09-20-socket-focus.log": "0.9.0",
+    "events-2026-09-23-herdr-0.9.1.log": "0.9.1",
+}
+
 # {raw log: [(category, name, header line, provenance, why)]}
 SELECTIONS = {
     "events-2026-09-18.log": [
@@ -130,6 +140,16 @@ SELECTIONS = {
         ("focus", "socket-pane-focus-pane-focused", 4, "programmatic", "socket pane.focus (the call FR-5.1 makes) emits pane.focused, so FR-6.1's dismiss trigger fires"),
         ("focus", "socket-pane-focus-tab-focused", 2, "programmatic", "Same burst: tab.focused, even though the tab did not change"),
         ("focus", "socket-pane-focus-workspace-focused", 3, "programmatic", "Same burst: workspace.focused, even though the workspace did not change"),
+    ],
+    "events-2026-09-23-herdr-0.9.1.log": [
+        ("focus", "manual-tab-click-pane-focused", 18, "manual", "User clicked another tab: pane.focused for its pane. 0.9.0 sent nothing for this"),
+        ("focus", "manual-tab-click-tab-focused", 17, "manual", "Same click: tab.focused"),
+        ("focus", "manual-tab-click-workspace-focused", 16, "manual", "Same click: workspace.focused, though the workspace did not change"),
+        ("focus", "manual-pane-click-pane-focused", 174, "manual", "User clicked the other pane in the same tab: pane.focused"),
+        ("focus", "manual-workspace-click-pane-focused", 250, "manual", "User clicked another workspace: pane.focused for its focused pane"),
+        ("focus", "socket-pane-focus-moved-pane-focused", 569, "programmatic", "Socket pane.focus onto a pane in another tab, the call a click makes"),
+        ("shell", "done-focused-terminal-in-background", 448, "programmatic", "Reported idle arrives as done on a pane focused in Herdr while the terminal app is in the background"),
+        ("lifecycle", "pane-closed-by-cli", 555, "programmatic", "herdr pane close on a pane in a background tab"),
     ],
 }
 
@@ -248,6 +268,7 @@ def write():
             marks = [r for r in records if r["event"] == "#mark" and r["line"] < line]
             fixture = {
                 "source": f"{rel_raw}:{line}",
+                "herdr_version": HERDR_VERSIONS[log],
                 "captured_at": rec["time"],
                 "provenance": provenance,
                 "mark": marks[-1]["event_json"] if marks else None,

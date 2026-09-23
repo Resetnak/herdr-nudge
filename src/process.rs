@@ -33,8 +33,8 @@ pub trait Runner {
 /// Starting a program and not waiting for it.
 ///
 /// Separate from [`Runner`] so that posting a notification has no way to
-/// wait: Herdr runs an event hook synchronously and blocks on it, so holding
-/// it open for the notifier would delay every event behind it.
+/// wait. Herdr doesn't wait for a hook, but a hook that stayed open for the
+/// notifier would hold its own banner back.
 pub trait Spawner {
     fn spawn(&self, program: &Path, args: &[String]) -> io::Result<()>;
 }
@@ -43,8 +43,9 @@ pub trait Spawner {
 /// `timeout`, whether it's the program that won't exit or its output that
 /// won't arrive.
 ///
-/// Event hooks run one at a time and Herdr waits for each, so a hung `herdr`
-/// call would hold up every event after it.
+/// Herdr doesn't wait for hooks, so a hung `herdr` call holds up only its
+/// own event. It would still leave a process behind until the timeout, and
+/// that event's banner with it.
 pub struct System {
     pub timeout: Duration,
 }

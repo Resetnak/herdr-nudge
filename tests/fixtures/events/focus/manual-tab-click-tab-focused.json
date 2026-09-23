@@ -1,0 +1,24 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-23-herdr-0.9.1.log:17",
+  "herdr_version": "0.9.1",
+  "captured_at": "10:24:52",
+  "provenance": "manual",
+  "mark": "[manual] navigation round: w3:t1 -> w3:t5 -> w3:t1, w3:p1 -> w3:p2 -> w3:p1, w3 -> w1 -> w3, about 3 s apart",
+  "why": "Same click: tab.focused",
+  "event": "tab.focused",
+  "event_json": "{\"event\":\"tab_focused\",\"data\":{\"type\":\"tab_focused\",\"tab_id\":\"w3:t5\",\"workspace_id\":\"w3\"}}",
+  "env": {
+    "HERDR_BIN_PATH": "/Users/dev/.local/bin/herdr",
+    "HERDR_ENV": "1",
+    "HERDR_PANE_ID": "w3:p9",
+    "HERDR_PLUGIN_CONFIG_DIR": "/Users/dev/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w3\",\"workspace_label\":\"herdr-nudge\",\"workspace_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"tab_id\":\"w3:t5\",\"tab_label\":\"2\",\"focused_pane_id\":\"w3:p9\",\"focused_pane_cwd\":\"/Users/dev/Developer/herdr-nudge\",\"focused_pane_agent\":\"make\",\"focused_pane_status\":\"idle\",\"invocation_source\":\"api\",\"correlation_id\":\"tab.focused\"}",
+    "HERDR_PLUGIN_EVENT": "tab.focused",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/Users/dev/Developer/herdr-nudge/tools/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/Users/dev/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/Users/dev/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w3:t5",
+    "HERDR_WORKSPACE_ID": "w3"
+  }
+}

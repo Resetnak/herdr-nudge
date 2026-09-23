@@ -7,7 +7,8 @@
 //! would stop notifications for good.
 //!
 //! Nothing is locked. The click process can run while an event hook does,
-//! so two writers to the same file means the last one wins.
+//! and Herdr doesn't wait for one hook before starting the next, so two
+//! writers to the same file means the last one wins.
 
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
@@ -27,16 +28,6 @@ use crate::event::AgentStatus;
 /// Bumped when a file's shape changes. A file with any other version is
 /// moved aside like a corrupt one.
 pub const VERSION: u32 = 1;
-
-/// How long a posted notification stops the same status notifying again.
-///
-/// Reporting metadata alone emits a status event carrying the unchanged
-/// status, so the same thing arrives more than once and needs swallowing.
-/// But it must be much shorter than how long the notification stays
-/// clickable: dismissing a banner tells us nothing, so a long window would
-/// leave a pane silent for the rest of the hour after a swipe. Seconds is
-/// all the churn needs.
-pub const REPEAT_AFTER_MS: u64 = 60_000;
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -178,7 +169,9 @@ pub trait Versioned {
 /// `server agent-manifests`.
 ///
 /// Cached because it costs a subprocess and changes about as often as Herdr
-/// is upgraded. Refreshed at startup, not per event.
+/// is upgraded. Refreshed when the server starts, and fetched by an event if
+/// the file is missing, as it is when the plugin is installed into a Herdr
+/// that is already running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentsCache {
     pub version: u32,
@@ -252,13 +245,6 @@ pub struct Job {
     pub notifier_path: PathBuf,
     pub created_at_ms: u64,
     pub expires_at_ms: u64,
-    /// Until when this notification stops the same status posting again.
-    /// Much sooner than `expires_at_ms`, and for a different reason.
-    ///
-    /// Defaulted so a job written before this field existed still reads; 0
-    /// then means it blocks nothing, which errs towards notifying.
-    #[serde(default)]
-    pub repeat_after_ms: u64,
 }
 
 impl Versioned for Job {
@@ -271,11 +257,6 @@ impl Job {
     /// Past this, the notification is no longer clickable and gets swept.
     pub fn is_expired(&self, now_ms: u64) -> bool {
         now_ms >= self.expires_at_ms
-    }
-
-    /// Whether posting the same status again would just be a duplicate.
-    pub fn blocks_repeat(&self, now_ms: u64) -> bool {
-        !self.is_expired(now_ms) && now_ms < self.repeat_after_ms
     }
 }
 

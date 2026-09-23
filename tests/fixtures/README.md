@@ -1,7 +1,11 @@
 # Test fixtures
 
-Every file here was captured from Herdr 0.9.0 on the dev machine. None is
-hand-written. Don't edit them; recapture instead.
+Every file here was captured from Herdr 0.9.0 or 0.9.1 on the dev machine.
+None is hand-written. Don't edit them; recapture instead. Each event fixture
+says which Herdr sent it (`herdr_version`, from the raw log it came from),
+and `cli/` and `socket/` captures record `herdr --version`. The two versions
+behave differently in places (finding 3), so both sets stay and both are
+replayed.
 
 ```
 raw/                 probe logs, exactly as tools/probe/dump.sh wrote them
@@ -53,8 +57,8 @@ should return nothing.
 
 To add event fixtures: mark each step while capturing (below), copy the new
 part of `tools/probe/events.log` into a new file in `raw/` (never edit an
-existing one), add entries to `SELECTIONS` in the script, then run `scrub`
-and `write`.
+existing one), add the log's Herdr version to `HERDR_VERSIONS` and its
+entries to `SELECTIONS` in the script, then run `scrub` and `write`.
 
 ## Provenance: manual vs programmatic
 
@@ -75,6 +79,7 @@ A programmatic result is never evidence for manual behaviour, or the reverse.
 ```json
 {
   "source": "tests/fixtures/raw/<log>:<line>",
+  "herdr_version": "0.9.0 | 0.9.1",
   "captured_at": "HH:MM:SS",
   "provenance": "manual | programmatic | unknown",
   "mark": "the last mark.sh note before this event, or null",
@@ -128,12 +133,20 @@ belong to the probe; tests should override them.
 | `focus/tab-focus-{tab,pane,workspace}-focused` | p | one `herdr tab focus` burst |
 | `focus/tab-focus-back-pane-focused` | p | the return burst, in a different order |
 | `focus/socket-pane-focus-{pane,tab,workspace}-focused` | p | socket `pane.focus`, the call a click makes: also a burst of three, so a click's own focus event can dismiss the notification |
+| `focus/manual-tab-click-{pane,tab,workspace}-focused` | m | 0.9.1: the user clicked another tab, and all three arrive |
+| `focus/manual-pane-click-pane-focused` | m | 0.9.1: the user clicked the other pane in the same tab |
+| `focus/manual-workspace-click-pane-focused` | m | 0.9.1: the user clicked another workspace |
+| `focus/socket-pane-focus-moved-pane-focused` | p | 0.9.1: socket `pane.focus` onto a pane in another tab |
+| `shell/done-focused-terminal-in-background` | p | 0.9.1: `done` for a pane focused in Herdr while another app was in front |
+| `lifecycle/pane-closed-by-cli` | p | 0.9.1: `herdr pane close` on a pane in a background tab |
 | `cli/agent-get-with-session` | m | `agent_session` present: an agent |
 | `cli/agent-get-reported-no-session` | p | agent label, no `agent_session`: a shell command |
 | `cli/agent-get-plain-shell` | – | `agent_not_found` on stderr, exit 1 |
 | `cli/agent-manifests` | – | the agent labels Herdr detects by itself |
+| `cli/agent-manifests-0.9.1` | – | the same on 0.9.1, which adds `letta` |
 | `cli/pane-get-focused` | – | `focused: true` for the pane the user is on |
 | `cli/pane-get-unfocused` | – | `focused: false`, and it works on a plain shell pane |
+| `cli/pane-get-unfocused-0.9.1` | p | 0.9.1, a pane claimed by `make`: the same fields as 0.9.0 |
 | `cli/pane-get-reported-no-session` | p | a pane claimed by `pane report-agent`: `agent`, `title` and `state_labels`, no `agent_session` |
 | `cli/pane-get-after-release` | p | the same pane after `release-agent`: no `agent`, `unknown` status, `title` and `state_labels` left behind |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
@@ -188,12 +201,12 @@ with their evidence rather than only in code comments.
    `working` the `idle` stays `idle`. A `[shell] statuses` of `idle` alone
    would miss the unwatched case, which is the one that matters, so `done`
    is in the default set too. `state_labels` survive the change.
-3. **Manual navigation emits no focus events.** Mouse and keyboard, across
-   panes, tabs and workspaces: zero `pane/tab/workspace.focused`
-   (`tests/manual_navigation_emits_no_focus_events.rs`). `herdr tab focus`
-   emits all three in the same
-   second, in varying order, and `workspace.focused` fires even when the
-   workspace doesn't change.
+3. **On 0.9.0, manual navigation emits no focus events.** Mouse and
+   keyboard, across panes, tabs and workspaces: zero
+   `pane/tab/workspace.focused`. `herdr tab focus` emits all three in the
+   same second, in varying order, and `workspace.focused` fires even when
+   the workspace doesn't change. **0.9.1 changed this**, see finding 11.
+   `tests/focus_events.rs` checks both.
 4. **`--seq` persists per pane and source, across a release.** Reusing
    `--seq 1` after an earlier claim silently dropped the `working` report.
    The zsh hook's `--seq` must keep increasing across shells.
@@ -249,11 +262,41 @@ with their evidence rather than only in code comments.
     shell hooks that don't pass them, not something Herdr enforces. Ours
     doesn't pass them.
 
+## Findings (2026-09-23 captures, Herdr 0.9.1)
+
+`raw/events-2026-09-23-herdr-0.9.1.log`, after the upgrade and a server
+restart.
+
+11. **Manual navigation sends focus events.** Eight mouse clicks: to another
+    tab by the tab bar and back, the same by the agent list on the left and
+    back, to the other pane in the tab and back, to another workspace and
+    back. Every one sent `pane.focused`, `tab.focused` and
+    `workspace.focused` within the same second, in varying order. The
+    keyboard wasn't tried.
+12. **The context can't tell a person from a script.** The manual focus
+    events above carry `invocation_source: "api"`, the same as every other
+    event in both versions. The context has the same fields as on 0.9.0.
+13. **Coming back to the terminal app sends nothing.** Cmd-Tab to Chrome
+    and back with the pane focused throughout: no focus event.
+14. **A pane that finished while the terminal was in the background, then
+    seen, sends nothing either.** `w3:p9` was focused in Herdr by
+    `herdr tab focus` while Chrome was in front, and a reported `idle`
+    arrived as `done` (`shell/done-focused-terminal-in-background`). The
+    user came back with Cmd-Tab: `herdr pane get` polled once a second read
+    `done` while Chrome was in front and `idle` from the moment Ghostty
+    was, but no status event followed. The same as on 0.9.0, where it was
+    seen with a real Claude pane.
+15. **Socket `pane.focus` on the pane that already has focus sends
+    nothing.** Onto a pane in another tab it sends all three, as on 0.9.0.
+16. **Pane ids are not decimal.** The next pane created in `w3` after `p9`
+    was `w3:pA`. Nothing here parses them.
+
 ## Still missing
 
 - `agent get` for a **real** agent without a Herdr integration. The
   shell-reporter case (`cli/agent-get-reported-no-session`) covers the same
   shape: label present, `agent_session` absent.
+- Manual navigation by keyboard on 0.9.1. Only the mouse was captured.
 - `blocked` while the user is in another **tab** or **workspace**, manual.
   Skipped: finding 1 already rules out `focused_pane_id`.
 - An `agent explain --file` replay, which would exercise agent detection

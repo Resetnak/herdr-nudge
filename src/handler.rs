@@ -6,6 +6,18 @@
 //! checked is whether any trigger set names this status at all. Past that
 //! point one `herdr pane get` answers two questions at once: is the user
 //! looking at this pane, and is it an agent or a shell command.
+//!
+//! Every event also reads `jobs/` once, before anything else. A job is a
+//! notification that is up, and one that no longer says what the pane is
+//! doing gets taken down: the pane changed status, closed, or the user went
+//! to it. That read costs no subprocess, and nothing is started unless a job
+//! turns out to be stale.
+//!
+//! Herdr doesn't wait for one hook before starting the next, so two can run
+//! at once for the same pane, and nothing here locks. Two events for one
+//! pane closer together than a posting hook takes (about 100 ms) can leave
+//! a banner up whose job the other hook deleted, so clicking it does
+//! nothing, or leave up one the second event should have taken down.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -19,7 +31,7 @@ use crate::event::{AgentStatus, Envelope, EventData, StatusEvent};
 use crate::herdr::{Cli, PaneInfo};
 use crate::notifier::{self, Notifier, Post};
 use crate::process::{Runner, Spawner};
-use crate::state::{self, Job, Loaded, StateDir, VERSION};
+use crate::state::{self, AgentsCache, Job, Loaded, StateDir, VERSION};
 use crate::terminal;
 
 pub struct Deps<'a, R: Runner, S: Spawner> {
@@ -41,8 +53,7 @@ pub struct Deps<'a, R: Runner, S: Spawner> {
 /// tests assert on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// Not `pane.agent_status_changed`. Clearing state for closed and
-    /// refocused panes isn't wired up yet.
+    /// An event we don't subscribe to.
     NotHandled,
     /// No trigger set names this status, so nothing was asked of Herdr.
     StatusNotWatched(AgentStatus),
@@ -65,6 +76,15 @@ pub enum Outcome {
     CannotBuildClick(String),
     Failed(String),
     Posted(Posted),
+    /// The pane closed, or the user went to it, and its notification was
+    /// taken down. Holds the group.
+    Withdrawn(String),
+    /// The pane closed or got focus, and it had no notification up.
+    NothingShowing,
+    /// The pane got focus while no terminal showing Herdr was in front, so
+    /// the user can't have seen it. A script moving focus looks like this.
+    /// Its notification stays up.
+    FocusedUnseen,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,53 +103,51 @@ pub struct Report {
     pub notes: Vec<String>,
 }
 
-impl Report {
-    fn new(outcome: Outcome, notes: Vec<String>) -> Report {
-        Report { outcome, notes }
-    }
-}
+/// A job on disk and the id its file is named by.
+pub type StoredJob = (JobId, Job);
 
-/// Drops jobs whose clickable time has run out and withdraws their
-/// notifications.
+/// Every job still clickable. Expired ones are withdrawn and deleted on the
+/// way, so this also does the sweeping.
 ///
-/// Runs on every event. It is a directory read, not a subprocess, and it only
-/// starts the notifier for a job that has actually expired.
-pub fn sweep_expired<S: Spawner>(
+/// A job that can't be read is left out. A corrupt one has already been
+/// renamed to `.corrupt-*` by `read_json`, and stays in `jobs/` as that.
+pub fn live_jobs<S: Spawner>(
     state: &StateDir,
     spawner: &S,
     now_ms: u64,
-) -> (Vec<JobId>, Vec<String>) {
-    let mut swept = Vec::new();
-    let mut notes = Vec::new();
-
+    notes: &mut Vec<String>,
+) -> Vec<StoredJob> {
     let ids = match state.job_ids() {
         Ok(ids) => ids,
         Err(e) => {
             notes.push(format!("could not list jobs: {e}"));
-            return (swept, notes);
+            return Vec::new();
         }
     };
 
+    let mut live = Vec::new();
+    let mut expired = Vec::new();
     for id in ids {
         let Ok(Loaded::Found(job)) = state.job(&id) else {
             continue;
         };
-        if !job.is_expired(now_ms) {
-            continue;
+        if job.is_expired(now_ms) {
+            expired.push((id, job));
+        } else {
+            live.push((id, job));
         }
-        let notifier = Notifier {
-            binary: &job.notifier_path,
-            spawner,
-        };
-        if let Err(e) = notifier.remove(&job.group) {
-            notes.push(format!("could not remove group {}: {e}", job.group));
-        }
-        if let Err(e) = state.delete_job(&id) {
-            notes.push(format!("could not delete job {id}: {e}"));
-        }
-        swept.push(id);
     }
-    (swept, notes)
+    if !expired.is_empty() {
+        notes.push(format!("swept {} expired job(s)", expired.len()));
+        // The group is per pane. An expired job left over next to a live one
+        // for the same pane would take the live banner down with it.
+        let (shadowed, alone): (Vec<_>, Vec<_>) = expired
+            .iter()
+            .partition(|(_, old)| live.iter().any(|(_, job)| job.pane_id == old.pane_id));
+        forget(state, shadowed.into_iter(), notes);
+        withdraw(state, spawner, alone.into_iter(), notes);
+    }
+    live
 }
 
 pub fn handle<R: Runner, S: Spawner>(
@@ -138,16 +156,175 @@ pub fn handle<R: Runner, S: Spawner>(
     context: Option<&Context>,
 ) -> Report {
     let mut notes = Vec::new();
-    let EventData::PaneAgentStatusChanged(event) = &envelope.data else {
-        return Report::new(Outcome::NotHandled, notes);
-    };
+    let jobs = live_jobs(deps.state, deps.spawner, deps.now_ms, &mut notes);
 
+    let outcome = match &envelope.data {
+        EventData::PaneAgentStatusChanged(event) => {
+            status_changed(deps, event, context, &jobs, &mut notes)
+        }
+        EventData::PaneClosed(pane) => {
+            let mine = for_pane(&jobs, &pane.pane_id);
+            withdraw_all(deps, &mine, &mut notes)
+        }
+        EventData::PaneFocused(pane) => focused(deps, &pane.pane_id, &jobs, &mut notes),
+        _ => Outcome::NotHandled,
+    };
+    Report { outcome, notes }
+}
+
+/// What runs as Herdr's startup hook, once per server start (not when a
+/// client attaches).
+///
+/// Every job from before `now_ms` goes. Herdr restores panes under the same
+/// ids after a restart, so a job from before it could focus a different pane
+/// than the one its banner is about. The cutoff keeps a job posted after this
+/// hook started, which a restored pane's first status event could do; one
+/// posted by a hook that started before this one is still dropped. The agent
+/// list is fetched again, since a restart is often a Herdr upgrade.
+///
+/// `herdr_bin` is `None` when the hook's environment didn't say where
+/// `herdr` is. The list is then left as it was.
+pub fn cleanup<R: Runner, S: Spawner>(
+    state: &StateDir,
+    herdr_bin: Option<&Path>,
+    runner: &R,
+    spawner: &S,
+    now_ms: u64,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+
+    let mut jobs = Vec::new();
+    match state.job_ids() {
+        Ok(ids) => {
+            for id in ids {
+                // An unreadable job is skipped: without it there is no group
+                // to withdraw. A corrupt one is renamed aside by `read_json`.
+                if let Ok(Loaded::Found(job)) = state.job(&id)
+                    && job.created_at_ms < now_ms
+                {
+                    jobs.push((id, job));
+                }
+            }
+        }
+        Err(e) => notes.push(format!("could not list jobs: {e}")),
+    }
+    if !jobs.is_empty() {
+        notes.push(format!(
+            "dropped {} job(s) from before the restart",
+            jobs.len()
+        ));
+        withdraw(state, spawner, jobs.iter(), &mut notes);
+    }
+
+    match herdr_bin {
+        Some(bin) => {
+            fetch_agents(&Cli { bin, runner }, state, now_ms, &mut notes);
+        }
+        None => notes.push("no HERDR_BIN_PATH, agent list not refreshed".to_owned()),
+    }
+    notes
+}
+
+/// Takes the pane's notification down if the user went to the pane.
+///
+/// Herdr 0.9.1 sends `pane.focused` when the user moves to a pane by hand,
+/// so this is what clears a banner once they have seen the pane
+/// (`tests/fixtures/events/focus/manual-*`). 0.9.0 sends it only for focus
+/// asked for through the CLI or the socket: our own click, which has deleted
+/// the job by then, or some other tool's script. So on 0.9.0 this seldom
+/// finds a job, and without one it costs nothing but the directory read.
+///
+/// Herdr's context says `invocation_source: "api"` for a mouse click too, so
+/// the event can't tell a person from a script. The terminal in front can:
+/// focus moved while the user was in another app is focus nobody saw.
+fn focused<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    pane_id: &str,
+    jobs: &[StoredJob],
+    notes: &mut Vec<String>,
+) -> Outcome {
+    let mine = for_pane(jobs, pane_id);
+    if mine.is_empty() {
+        return Outcome::NothingShowing;
+    }
+    let resolution = terminal::resolve(deps.config, deps.runner, deps.socket_path, notes);
+    if !resolution.in_front(deps.runner) {
+        return Outcome::FocusedUnseen;
+    }
+    withdraw_all(deps, &mine, notes)
+}
+
+fn withdraw_all<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    mine: &[&StoredJob],
+    notes: &mut Vec<String>,
+) -> Outcome {
+    // Every job for one pane has the same group.
+    let Some((_, job)) = mine.first() else {
+        return Outcome::NothingShowing;
+    };
+    let group = job.group.clone();
+    withdraw(deps.state, deps.spawner, mine.iter().copied(), notes);
+    Outcome::Withdrawn(group)
+}
+
+/// A status change: post it, or say why not, and take down whatever the
+/// pane had up before if it no longer applies.
+fn status_changed<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    event: &StatusEvent,
+    context: Option<&Context>,
+    jobs: &[StoredJob],
+    notes: &mut Vec<String>,
+) -> Outcome {
+    let mine = for_pane(jobs, &event.pane_id);
+
+    // Only the newest is on screen, because the group is per pane and each
+    // post replaced the one before. Anything older is left over from a
+    // delete that failed and must not pass for what is showing.
+    //
+    // A repeat is normal: reporting new metadata alone emits a status event
+    // carrying the unchanged status. Caught here, before any subprocess.
+    //
+    // An event with no label of its own matches on status alone, because the
+    // job's label may then have come from `pane get` instead.
+    let newest = mine.iter().max_by_key(|(_, job)| job.created_at_ms);
+    if let Some((id, job)) = newest
+        && job.status == event.agent_status
+        && (event.agent.is_none() || job.agent_label.as_deref() == event.agent.as_deref())
+    {
+        let leftovers = mine.iter().copied().filter(|(other, _)| other != id);
+        forget(deps.state, leftovers, notes);
+        return Outcome::AlreadyShowing(id.to_string());
+    }
+
+    let outcome = notify(deps, event, context, notes);
+
+    // Whatever was up is out of date: the pane has moved on, since it isn't
+    // the status above. A new post already replaced it on screen, in the same
+    // group, so only the files go. A `-remove` now could reach the notifier
+    // after the post and take the new banner down with it.
+    if matches!(outcome, Outcome::Posted(_)) {
+        forget(deps.state, mine.iter().copied(), notes);
+    } else if !mine.is_empty() {
+        withdraw(deps.state, deps.spawner, mine.iter().copied(), notes);
+    }
+    outcome
+}
+
+/// Everything from the trigger gate to the banner.
+fn notify<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    event: &StatusEvent,
+    context: Option<&Context>,
+    notes: &mut Vec<String>,
+) -> Outcome {
     // Before anything else, and without asking Herdr: could this status ever
     // produce a notification? The trigger set depends on whether the pane is
     // an agent, and that answer costs a subprocess, so the union of both sets
     // is what gets checked here.
     if !watched_by_any(deps.config, event.agent_status) {
-        return Report::new(Outcome::StatusNotWatched(event.agent_status), notes);
+        return Outcome::StatusNotWatched(event.agent_status);
     }
 
     let cli = Cli {
@@ -171,48 +348,32 @@ pub fn handle<R: Runner, S: Spawner>(
 
     let classification = classify::classify(
         deps.config,
-        &manifests(deps.state, &mut notes),
+        &manifests(&cli, deps.state, deps.now_ms, notes),
         agent_label,
         info.as_ref().map(PaneInfo::has_agent_session),
     );
 
     if let Some(outcome) = decide(deps.config, classification, event, agent_label) {
-        return Report::new(outcome, notes);
-    }
-
-    // A status that repeats is normal: reporting metadata alone emits a
-    // status event carrying the unchanged status. Checked before finding the
-    // terminal, which costs a few subprocesses.
-    if let Some(showing) = live_job(deps, event, agent_label, &mut notes) {
-        return Report::new(Outcome::AlreadyShowing(showing), notes);
+        return outcome;
     }
 
     if !deps.notifier_bin.is_file() {
-        return Report::new(
-            Outcome::NotifierMissing(deps.notifier_bin.to_owned()),
-            notes,
-        );
+        return Outcome::NotifierMissing(deps.notifier_bin.to_owned());
     }
 
-    let resolution = terminal::resolve(deps.config, deps.runner, deps.socket_path, &mut notes);
+    let resolution = terminal::resolve(deps.config, deps.runner, deps.socket_path, notes);
 
     // What app is in front only matters when the user is on this pane, so the
     // two `lsappinfo` calls happen only then.
     let focused = info.as_ref().map(|i| i.focused);
-    if focused == Some(true)
-        && !resolution.showing.is_empty()
-        && terminal::frontmost_bundle_id(deps.runner)
-            .is_some_and(|front| resolution.showing.contains(&front))
-    {
-        return Report::new(Outcome::Watching, notes);
+    if focused == Some(true) && resolution.in_front(deps.runner) {
+        return Outcome::Watching;
     }
 
     let job_id = state::new_job_id(deps.now_ms, deps.pid);
     let execute = match notifier::click_command(deps.self_bin, &job_id) {
         Ok(execute) => execute,
-        Err(e) => {
-            return Report::new(Outcome::CannotBuildClick(e.to_string()), notes);
-        }
+        Err(e) => return Outcome::CannotBuildClick(e.to_string()),
     };
 
     let group = notifier::group_for(&event.pane_id);
@@ -246,17 +407,13 @@ pub fn handle<R: Runner, S: Spawner>(
                 .clickable_secs
                 .saturating_mul(1000),
         ),
-        repeat_after_ms: deps.now_ms.saturating_add(state::REPEAT_AFTER_MS),
     };
 
     // Written before anything is on screen, because a banner can be clicked
-    // the moment it appears and a click with no job file does nothing. The
-    // old job is dropped only after this one is safely on disk, so a failed
-    // write leaves the notification that is already up still clickable.
+    // the moment it appears and a click with no job file does nothing.
     if let Err(e) = deps.state.save_job(&job) {
-        return Report::new(Outcome::Failed(format!("could not write job: {e}")), notes);
+        return Outcome::Failed(format!("could not write job: {e}"));
     }
-    drop_other_jobs(deps, &event.pane_id, &job_id, &mut notes);
 
     let image = logo_for(deps, classification.kind, agent_label);
     let notifier = Notifier {
@@ -275,26 +432,18 @@ pub fn handle<R: Runner, S: Spawner>(
     if let Err(e) = notifier.post(&post) {
         // Nothing reached the screen, so the job must not stay: it would
         // suppress the next event as a duplicate of a banner that never
-        // existed, and later withdraw whatever notification does make it up.
-        if let Err(e) = deps.state.delete_job(&job_id) {
-            notes.push(format!("could not delete unposted job {job_id}: {e}"));
-        }
-        return Report::new(
-            Outcome::Failed(format!("could not start the notifier: {e}")),
-            notes,
-        );
+        // existed.
+        delete_job(deps.state, &job_id, notes);
+        return Outcome::Failed(format!("could not start the notifier: {e}"));
     }
 
-    Report::new(
-        Outcome::Posted(Posted {
-            job_id,
-            group,
-            kind: classification.kind,
-            signal: classification.signal,
-            title: content.title,
-        }),
-        notes,
-    )
+    Outcome::Posted(Posted {
+        job_id,
+        group,
+        kind: classification.kind,
+        signal: classification.signal,
+        title: content.title,
+    })
 }
 
 /// Either side of the config could want this status. Both are checked with
@@ -346,82 +495,94 @@ fn decide(
     None
 }
 
-fn manifests(state: &StateDir, notes: &mut Vec<String>) -> BTreeSet<String> {
+/// Herdr's agent list, from the cache. Fetched here when the cache is
+/// missing, which it is when the plugin was installed into a running Herdr:
+/// the startup hook that normally writes it hasn't run yet. Without it every
+/// agent without its own Herdr integration reads as a shell command.
+fn manifests<R: Runner>(
+    cli: &Cli<R>,
+    state: &StateDir,
+    now_ms: u64,
+    notes: &mut Vec<String>,
+) -> BTreeSet<String> {
     match state.agents_cache() {
-        Ok(loaded) => loaded.into_value().agents,
-        Err(e) => {
-            notes.push(format!("agents cache: {e}"));
-            BTreeSet::new()
-        }
+        Ok(Loaded::Found(cache)) => return cache.agents,
+        Ok(Loaded::Missing) => {}
+        Ok(Loaded::Recovered(r)) => notes.push(format!("agents cache set aside: {}", r.reason)),
+        Err(e) => notes.push(format!("agents cache: {e}")),
     }
+    fetch_agents(cli, state, now_ms, notes)
+        .map(|cache| cache.agents)
+        .unwrap_or_default()
 }
 
-/// The job id of a notification already showing for this pane, agent and
-/// status.
-///
-/// Only the pane's newest job counts, because that is the one on screen: the
-/// group is per pane. An older job is normally deleted when a newer one is
-/// posted, but if that delete failed, the leftover must not pass for what is
-/// showing.
-fn live_job<R: Runner, S: Spawner>(
-    deps: &Deps<R, S>,
-    event: &StatusEvent,
-    agent_label: Option<&str>,
+/// Asks Herdr for its agent list and caches it. A list that can't be saved
+/// is still returned, so the event that fetched it can use it.
+fn fetch_agents<R: Runner>(
+    cli: &Cli<R>,
+    state: &StateDir,
+    now_ms: u64,
     notes: &mut Vec<String>,
-) -> Option<String> {
-    let ids = match deps.state.job_ids() {
-        Ok(ids) => ids,
+) -> Option<AgentsCache> {
+    let agents = match cli.agent_manifests() {
+        Ok(agents) => agents,
         Err(e) => {
-            notes.push(format!("could not list jobs: {e}"));
+            notes.push(format!("could not fetch the agent list: {e}"));
             return None;
         }
     };
-    let newest = ids
-        .into_iter()
-        .filter_map(|id| match deps.state.job(&id) {
-            Ok(Loaded::Found(job)) if job.pane_id == event.pane_id => Some(job),
-            _ => None,
-        })
-        .max_by_key(|job| job.created_at_ms)?;
-    let same = newest.blocks_repeat(deps.now_ms)
-        && newest.status == event.agent_status
-        && newest.agent_label.as_deref() == agent_label;
-    same.then_some(newest.id)
+    let cache = AgentsCache::new(agents, now_ms);
+    match state.save_agents_cache(&cache) {
+        Ok(()) => notes.push(format!("fetched the agent list ({})", cache.agents.len())),
+        Err(e) => notes.push(format!("could not save the agent list: {e}")),
+    }
+    Some(cache)
 }
 
-/// Drops every job for this pane except the one just written.
-///
-/// This includes a job from another agent identity, as when `claude` gives
-/// the pane up and `make` claims it. The group is per-pane, so that banner
-/// has already been replaced on screen, but a job left behind would still be
-/// swept later, and the sweep would then `-remove` the group this new
-/// notification is using.
-fn drop_other_jobs<R: Runner, S: Spawner>(
-    deps: &Deps<R, S>,
-    pane_id: &str,
-    keep: &JobId,
+fn for_pane<'a>(jobs: &'a [StoredJob], pane_id: &str) -> Vec<&'a StoredJob> {
+    jobs.iter()
+        .filter(|(_, job)| job.pane_id == pane_id)
+        .collect()
+}
+
+/// Takes the notifications down and deletes the jobs. The group is per pane,
+/// so jobs for one pane share a single `-remove`.
+fn withdraw<'a, S: Spawner>(
+    state: &StateDir,
+    spawner: &S,
+    jobs: impl Iterator<Item = &'a StoredJob>,
     notes: &mut Vec<String>,
 ) {
-    let ids = match deps.state.job_ids() {
-        Ok(ids) => ids,
-        Err(e) => {
-            notes.push(format!("could not list jobs: {e}"));
-            return;
+    let mut removed = BTreeSet::new();
+    for (id, job) in jobs {
+        if removed.insert((&job.notifier_path, &job.group)) {
+            let notifier = Notifier {
+                binary: &job.notifier_path,
+                spawner,
+            };
+            match notifier.remove(&job.group) {
+                Ok(()) => notes.push(format!("withdrew {} ({})", job.group, job.status)),
+                Err(e) => notes.push(format!("could not remove group {}: {e}", job.group)),
+            }
         }
-    };
-    for id in ids {
-        if &id == keep {
-            continue;
-        }
-        let Ok(Loaded::Found(job)) = deps.state.job(&id) else {
-            continue;
-        };
-        if job.pane_id != pane_id {
-            continue;
-        }
-        if let Err(e) = deps.state.delete_job(&id) {
-            notes.push(format!("could not delete superseded job {id}: {e}"));
-        }
+        delete_job(state, id, notes);
+    }
+}
+
+/// Deletes the jobs and leaves the screen alone.
+fn forget<'a>(
+    state: &StateDir,
+    jobs: impl Iterator<Item = &'a StoredJob>,
+    notes: &mut Vec<String>,
+) {
+    for (id, _) in jobs {
+        delete_job(state, id, notes);
+    }
+}
+
+fn delete_job(state: &StateDir, id: &JobId, notes: &mut Vec<String>) {
+    if let Err(e) = state.delete_job(id) {
+        notes.push(format!("could not delete job {id}: {e}"));
     }
 }
 
