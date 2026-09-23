@@ -59,6 +59,7 @@ fn a_job(id: &JobId, expires_at_ms: u64, socket_path: &Path) -> Job {
         status: AgentStatus::Blocked,
         group: "herdr-nudge-w3:p1".to_owned(),
         bundle_id: Some("com.mitchellh.ghostty".to_owned()),
+        detect_at_click: false,
         socket_path: socket_path.to_owned(),
         notifier_path: PathBuf::from(
             "/plugin/vendor/HerdrNudge.app/Contents/MacOS/terminal-notifier",
@@ -129,6 +130,87 @@ fn clicking_raises_the_terminal_then_focuses_the_pane() {
         runner.at.borrow()[0] < received.connected_at,
         "open -b should run before the socket is reached, so the focus change lands in a raised window"
     );
+}
+
+/// The banner can be an hour old. Posted while the user was in iTerm, clicked
+/// after they moved to Ghostty: Ghostty is raised. Only 40822 (Ghostty) of
+/// the `nudge-capture` clients is left attached here, and the fake socket
+/// stands in for that session's.
+#[test]
+fn a_click_raises_the_terminal_attached_now_not_the_one_posted_from() {
+    let state = state_for("click_redetect");
+    let (socket, server) = fake_herdr("ck_redet", &SocketExchange::load("pane-focus-ok"));
+    let id = job_id();
+    let mut job = a_job(&id, 9_000, &socket);
+    job.bundle_id = Some("com.googlecode.iterm2".to_owned());
+    job.detect_at_click = true;
+    state.save_job(&job).expect("save job");
+
+    let mut pgrep = Recorded::sys("pgrep-herdr-two-sessions");
+    pgrep.stdout = pgrep
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with("40822 ") || l.starts_with("40823 "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let mut lsof = Recorded::sys("lsof-capture-session-one-client");
+    lsof.stdout = lsof.stdout.replace(
+        "/Users/dev/.config/herdr/sessions/nudge-capture/herdr.sock",
+        &socket.to_string_lossy(),
+    );
+    let runner = Replay::new([
+        pgrep,
+        lsof,
+        Recorded::sys("ps-env-capture-session-one-client"),
+        Recorded::sys("open-bundle-ghostty"),
+    ]);
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::Focused { .. }),
+        "outcome: {outcome:?}, notes: {notes:?}"
+    );
+    assert_eq!(
+        notes,
+        ["clients 40822=com.mitchellh.ghostty -> com.mitchellh.ghostty"]
+    );
+    assert_eq!(
+        runner.calls.borrow().last().map(|c| c.join(" ")).as_deref(),
+        Some("/usr/bin/open -b com.mitchellh.ghostty")
+    );
+    server.join().expect("fake socket");
+}
+
+/// No client attached any more (`pgrep-herdr-none`): the terminal from when
+/// it was posted.
+#[test]
+fn with_no_client_left_the_click_raises_the_job_terminal() {
+    let state = state_for("click_no_client");
+    let (socket, server) = fake_herdr("ck_nocl", &SocketExchange::load("pane-focus-ok"));
+    let id = job_id();
+    let mut job = a_job(&id, 9_000, &socket);
+    job.detect_at_click = true;
+    state.save_job(&job).expect("save job");
+
+    let mut none = Recorded::sys("pgrep-herdr-none");
+    none.argv = ["pgrep", "-a", "-lf", "^([^ ]*/)?herdr( |$)"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let runner = Replay::new([none, Recorded::sys("open-bundle-ghostty")]);
+    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::Focused { .. }),
+        "outcome: {outcome:?}, notes: {notes:?}"
+    );
+    assert_eq!(runner.call_count(), 2, "{:?}", runner.calls.borrow());
+    assert_eq!(
+        runner.calls.borrow()[1][2],
+        "com.mitchellh.ghostty",
+        "the job's bundle_id"
+    );
+    server.join().expect("fake socket");
 }
 
 /// With no terminal resolved there is nothing to raise, but the pane can

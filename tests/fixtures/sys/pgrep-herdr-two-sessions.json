@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "pgrep",
+    "-a",
+    "-lf",
+    "^([^ ]*/)?herdr( |$)"
+  ],
+  "captured_at": "2026-09-23T09:15:09",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "21836 herdr\n40822 herdr --session nudge-capture\n40823 /Users/dev/.local/bin/herdr server\n40852 herdr --session nudge-capture\n40869 herdr --session nudge-capture\n86128 herdr\n86129 /Users/dev/.local/bin/herdr server\n",
+  "stderr": ""
+}

@@ -144,6 +144,25 @@ belong to the probe; tests should override them.
 | `sys/lsappinfo-bundleid-gone` | – | an app that has quit: `[ NULL ]`, still exit 0 |
 | `sys/open-bundle-ghostty` | – | `open -b` raising the terminal a click goes to: exit 0, no output |
 | `sys/open-bundle-unknown` | – | `open -b` with a bundle id nothing has: exit 1, reason on stderr |
+| `sys/pgrep-herdr-two-sessions` | – | every `herdr` process: the default session's server (86129) and two clients (86128 in Ghostty, 21836 in iTerm), and a second session `nudge-capture` with its server (40823) and three clients (40822, 40852, 40869) |
+| `sys/pgrep-herdr-none` | – | the same query matching nothing: exit 1, no output. Captured with a pattern that matches no process, so tests replay it under the real argv |
+| `sys/lsof-capture-session-clients` | – | unix sockets of both servers and every client. Each server holds its own `herdr.sock` under that name, and each client connects to a `herdr-client.sock` socket of its own server |
+| `sys/lsof-capture-session-one-client` | – | the same for the `nudge-capture` server and its Ghostty client alone |
+| `sys/ps-env-capture-session-clients` | – | the three `nudge-capture` clients' command lines and environments: Ghostty, iTerm, none |
+| `sys/ps-env-capture-session-one-client` | – | the Ghostty one alone |
+| `sys/lsappinfo-visible-process-list` | – | visible apps, most recently used first: Ghostty, then Chrome, then iTerm |
+| `sys/lsappinfo-find-{ghostty,iterm}` | – | a running app's ASN, by bundle id |
+| `sys/lsappinfo-find-not-running` | – | an app that isn't running: exit 0, no output |
+
+The `nudge-capture` session was made for these captures and deleted
+afterwards. Its server and clients were started from a pty with only
+`HOME`, `PATH`, `TERM` and `LANG` set, plus `__CFBundleIdentifier` and
+`TERM_PROGRAM` copied from a real Ghostty or iTerm shell, because `ps -E`
+prints a process's whole environment and a real terminal's holds tokens.
+So the terminals in them are the right values for those apps, but the
+clients did not really run inside the apps. The default session's
+clients have real environments, which is why no `ps -E` capture includes
+them.
 
 ## Findings (2026-09-18 captures)
 

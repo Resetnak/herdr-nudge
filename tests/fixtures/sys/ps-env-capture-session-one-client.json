@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "ps",
+    "-Eww",
+    "-o",
+    "pid=,etime=,command=",
+    "-p",
+    "40822"
+  ],
+  "captured_at": "2026-09-23T09:15:10",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "40822 01:25 herdr --session nudge-capture HOME=/Users/dev PATH=/usr/bin:/bin:/usr/sbin:/sbin TERM=xterm-256color LANG=en_US.UTF-8 __CFBundleIdentifier=com.mitchellh.ghostty TERM_PROGRAM=ghostty\n",
+  "stderr": ""
+}

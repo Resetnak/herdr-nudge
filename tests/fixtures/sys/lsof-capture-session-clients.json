@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "lsof",
+    "-b",
+    "-w",
+    "-U",
+    "-a",
+    "-p",
+    "21836,40822,40823,40852,40869,86128,86129",
+    "-F",
+    "dn"
+  ],
+  "captured_at": "2026-09-23T09:15:09",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "p21836\nf4\nd0x639511105805ac3e\nn->0xbaf8d21446d6573\nf8\nd0x5d3ff071d4ec12d3\nn->0x2372c7aa544412af\nf9\nd0x2372c7aa544412af\nn->0x5d3ff071d4ec12d3\nf10\nd0x5d3ff071d4ec12d3\nn->0x2372c7aa544412af\nf11\nd0x639511105805ac3e\nn->0xbaf8d21446d6573\np40822\nf4\nd0x1028560ce0b1873\nn->0xe3c4c3eaaa332d9f\nf8\nd0xf2afa5c29037f629\nn->0x218bd625e163f6ac\nf9\nd0x218bd625e163f6ac\nn->0xf2afa5c29037f629\nf10\nd0xf2afa5c29037f629\nn->0x218bd625e163f6ac\nf11\nd0x1028560ce0b1873\nn->0xe3c4c3eaaa332d9f\np40823\nf4\nd0x89bd8e80b8034479\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr.sock\nf8\nd0x31dc5f4f40e7ae6b\nn->0x47f567c504039433\nf9\nd0x47f567c504039433\nn->0x31dc5f4f40e7ae6b\nf10\nd0x31dc5f4f40e7ae6b\nn->0x47f567c504039433\nf11\nd0x5bcbdf78a622100c\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf13\nd0xe3c4c3eaaa332d9f\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf15\nd0xe3c4c3eaaa332d9f\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf17\nd0xd7c4c134c945e703\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf18\nd0x5bcbdf78a622100c\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf19\nd0x7ce7a9004f2ec4ad\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf20\nd0x7ce7a9004f2ec4ad\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\np40852\nf5\nd0xf9c65cc42a3eb6b5\nn->0x5bcbdf78a622100c\nf9\nd0xd37e8dccab7f5fee\nn->0x1f3cd7f4b219cb27\nf10\nd0x1f3cd7f4b219cb27\nn->0xd37e8dccab7f5fee\nf11\nd0xd37e8dccab7f5fee\nn->0x1f3cd7f4b219cb27\nf12\nd0xf9c65cc42a3eb6b5\nn->0x5bcbdf78a622100c\np40869\nf6\nd0xa4a9c8e5b71731b5\nn->0x7ce7a9004f2ec4ad\nf10\nd0xdedde145a9bd9fac\nn->0x921e7f0b02813e3\nf11\nd0x921e7f0b02813e3\nn->0xdedde145a9bd9fac\nf12\nd0xdedde145a9bd9fac\nn->0x921e7f0b02813e3\nf13\nd0xa4a9c8e5b71731b5\nn->0x7ce7a9004f2ec4ad\np86128\nf4\nd0x8b9d73565487d95f\nn->0x3a6b2c093472b31a\nf8\nd0xa1e3a1cb9adf8835\nn->0x9171478b97189a89\nf9\nd0x9171478b97189a89\nn->0xa1e3a1cb9adf8835\nf10\nd0xa1e3a1cb9adf8835\nn->0x9171478b97189a89\nf11\nd0x8b9d73565487d95f\nn->0x3a6b2c093472b31a\np86129\nf4\nd0xf9b2c7248e084815\nn/Users/dev/.config/herdr/herdr.sock\nf8\nd0xfee408ef50e8a97e\nn->0x6dea34a4541c0c5\nf9\nd0x6dea34a4541c0c5\nn->0xfee408ef50e8a97e\nf10\nd0xfee408ef50e8a97e\nn->0x6dea34a4541c0c5\nf26\nd0xbaf8d21446d6573\nn/Users/dev/.config/herdr/herdr-client.sock\nf27\nd0xfe35b28d68359bb2\nn/Users/dev/.config/herdr/herdr-client.sock\nf28\nd0x3a6b2c093472b31a\nn/Users/dev/.config/herdr/herdr-client.sock\nf29\nd0x3a6b2c093472b31a\nn/Users/dev/.config/herdr/herdr-client.sock\nf42\nd0xbaf8d21446d6573\nn/Users/dev/.config/herdr/herdr-client.sock\n",
+  "stderr": ""
+}

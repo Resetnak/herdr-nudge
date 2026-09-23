@@ -89,31 +89,6 @@ fn a_missing_variable_is_named_rather_than_guessed() {
     assert!(!message.contains("HERDR_BIN_PATH"), "{message}");
 }
 
-/// The probe keeps only `HERDR_*`, so no captured environment has
-/// `__CFBundleIdentifier`; it is added here. It is optional: a server started
-/// outside any app has none, and that must not stop the hook.
-#[test]
-fn the_server_terminal_is_read_when_present_and_optional_otherwise() {
-    let mut env: BTreeMap<String, String> = Fixture::load("agent/blocked").env.clone();
-    assert_eq!(
-        Env::from_map(&env).unwrap().server_terminal,
-        None,
-        "agent/blocked as captured"
-    );
-
-    env.insert(
-        "__CFBundleIdentifier".into(),
-        "com.mitchellh.ghostty".into(),
-    );
-    assert_eq!(
-        Env::from_map(&env).unwrap().server_terminal.as_deref(),
-        Some("com.mitchellh.ghostty")
-    );
-
-    env.insert("__CFBundleIdentifier".into(), String::new());
-    assert_eq!(Env::from_map(&env).unwrap().server_terminal, None, "empty");
-}
-
 /// The context also carries `focused_pane_id` and `invocation_source`, which
 /// look useful and aren't (see the note in `src/context.rs`). `Context`
 /// doesn't read either one, and this keeps it that way: in `src/` they may

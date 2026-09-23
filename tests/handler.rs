@@ -28,7 +28,6 @@ struct Harness {
     notifier_bin: PathBuf,
     self_bin: PathBuf,
     socket: PathBuf,
-    server_terminal: Option<String>,
     now_ms: u64,
 }
 
@@ -54,7 +53,6 @@ impl Harness {
             notifier_bin,
             self_bin,
             socket: dir.join("herdr.sock"),
-            server_terminal: None,
             now_ms: now_ms(),
         }
     }
@@ -80,7 +78,6 @@ impl Harness {
             notifier_bin: &self.notifier_bin,
             self_bin: &self.self_bin,
             plugin_root: &self.plugin_root,
-            server_terminal: self.server_terminal.as_deref(),
             runner: &self.runner,
             spawner: &self.spy,
             now_ms: self.now_ms,
@@ -325,35 +322,63 @@ fn a_pane_the_user_is_watching_stays_quiet() {
     );
 }
 
-/// With no `default_terminal`, the terminal the server was started from is
-/// what counts as "the user is looking", and what a click raises.
-#[test]
-fn the_server_terminal_stands_in_for_default_terminal() {
-    let mut harness = Harness::new("server_terminal_watching", Vec::new());
-    let mut pane_get = Recorded::cli("pane-get-focused");
+/// `pane get` for `w1:p1` answered from `recording`, then the captured
+/// `nudge-capture` session, whose socket the harness now claims: clients in
+/// Ghostty (used last) and iTerm.
+/// `tests/terminal.rs` describes that capture.
+fn with_two_terminals(test_name: &str, recording: &str, front: &str) -> Harness {
+    let mut pane_get = Recorded::cli(recording);
     pane_get.argv = ["herdr", "pane", "get", "w1:p1"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    harness.runner = Replay::new(vec![
+    let mut frontmost = Recorded::sys("lsappinfo-bundleid-ghostty");
+    frontmost.stdout = format!("\"CFBundleIdentifier\"=\"{front}\"\n");
+    let mut harness = Harness::new(test_name, Vec::new());
+    harness.runner = Replay::new([
         pane_get,
+        Recorded::sys("pgrep-herdr-two-sessions"),
+        Recorded::sys("lsof-capture-session-clients"),
+        Recorded::sys("ps-env-capture-session-clients"),
+        Recorded::sys("lsappinfo-visible-process-list"),
+        Recorded::sys("lsappinfo-find-ghostty"),
+        Recorded::sys("lsappinfo-find-iterm"),
         Recorded::sys("lsappinfo-front"),
-        Recorded::sys("lsappinfo-bundleid-ghostty"),
+        frontmost,
     ]);
-    harness.server_terminal = Some("com.mitchellh.ghostty".to_owned());
+    harness.socket = PathBuf::from("/Users/dev/.config/herdr/sessions/nudge-capture/herdr.sock");
     harness.remember_agents(&["claude"]);
+    harness
+}
 
-    assert_eq!(
-        harness.handle("agent/blocked"),
-        Outcome::Watching,
-        "pane-get-focused with Ghostty in front and in the server env"
+/// With no `default_terminal`, the attached clients' terminals are what
+/// counts as "the user is looking". Either one: iTerm in front shows the
+/// focused pane as much as Ghostty does, though Ghostty is what a click
+/// raises.
+#[test]
+fn any_client_terminal_in_front_counts_as_watching() {
+    for front in ["com.mitchellh.ghostty", "com.googlecode.iterm2"] {
+        let harness = with_two_terminals("client_watching", "pane-get-focused", front);
+        assert_eq!(
+            harness.handle("agent/blocked"),
+            Outcome::Watching,
+            "pane-get-focused with {front} in front"
+        );
+    }
+    let harness = with_two_terminals(
+        "client_not_watching",
+        "pane-get-focused",
+        "com.apple.Safari",
     );
+    assert!(
+        matches!(harness.handle("agent/blocked"), Outcome::Posted(_)),
+        "pane-get-focused with Safari in front"
+    );
+}
 
-    let harness = Harness {
-        server_terminal: Some("com.mitchellh.ghostty".to_owned()),
-        ..Harness::answering("server_terminal_job", "w1:p1", "pane-get-unfocused")
-    };
-    harness.remember_agents(&["claude"]);
+#[test]
+fn the_job_names_the_client_terminal_and_asks_the_click_to_look_again() {
+    let harness = with_two_terminals("client_job", "pane-get-unfocused", "com.mitchellh.ghostty");
     let Outcome::Posted(posted) = harness.handle("agent/blocked") else {
         panic!("agent/blocked on an unfocused pane did not post");
     };
@@ -363,7 +388,57 @@ fn the_server_terminal_stands_in_for_default_terminal() {
     assert_eq!(
         job.bundle_id.as_deref(),
         Some("com.mitchellh.ghostty"),
-        "job bundle_id, from the server env"
+        "job bundle_id, the client terminal used last"
+    );
+    assert!(job.detect_at_click, "job detect_at_click");
+}
+
+/// The config wins at click time as well, so the click is given nothing to
+/// look again with.
+#[test]
+fn default_terminal_leaves_the_click_nothing_to_detect() {
+    let mut harness = Harness::answering("config_job", "w1:p1", "pane-get-unfocused");
+    harness.config.default_terminal = Some("com.googlecode.iterm2".to_owned());
+    harness.remember_agents(&["claude"]);
+    let Outcome::Posted(posted) = harness.handle("agent/blocked") else {
+        panic!("agent/blocked on an unfocused pane did not post");
+    };
+    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
+        panic!("no job file");
+    };
+    assert_eq!(job.bundle_id.as_deref(), Some("com.googlecode.iterm2"));
+    assert!(!job.detect_at_click);
+    assert_eq!(
+        harness.runner.call_count(),
+        1,
+        "only pane get: {:?}",
+        harness.runner.calls.borrow()
+    );
+}
+
+/// A repeat of what is already showing costs no process scan.
+#[test]
+fn a_repeat_is_caught_before_looking_for_clients() {
+    let mut harness = with_two_terminals(
+        "client_repeat",
+        "pane-get-unfocused",
+        "com.mitchellh.ghostty",
+    );
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::Posted(_)
+    ));
+    let before = harness.runner.call_count();
+    harness.now_ms += 1_000;
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::AlreadyShowing(_)
+    ));
+    assert_eq!(
+        harness.runner.call_count(),
+        before + 1,
+        "the repeat should only run pane get: {:?}",
+        &harness.runner.calls.borrow()[before..]
     );
 }
 
@@ -675,6 +750,7 @@ fn an_expired_job_never_blocks_a_repeat() {
         status: AgentStatus::Blocked,
         group: "g".to_owned(),
         bundle_id: None,
+        detect_at_click: false,
         socket_path: PathBuf::new(),
         notifier_path: PathBuf::new(),
         created_at_ms: 0,

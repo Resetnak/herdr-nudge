@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "lsappinfo",
+    "find",
+    "bundleid=com.googlecode.iterm2"
+  ],
+  "captured_at": "2026-09-23T08:43:33",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "ASN:0x0-0xa20a20-\"iTerm2\":\n",
+  "stderr": ""
+}

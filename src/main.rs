@@ -114,7 +114,6 @@ fn run_event() -> ExitCode {
         notifier_bin: &notifier::binary_path(&env.plugin_root),
         self_bin: &self_bin,
         plugin_root: &env.plugin_root,
-        server_terminal: env.server_terminal.as_deref(),
         runner: &system,
         spawner: &system,
         now_ms: herdr_nudge::state::now_ms(),

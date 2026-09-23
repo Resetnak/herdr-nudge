@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "lsof",
+    "-b",
+    "-w",
+    "-U",
+    "-a",
+    "-p",
+    "40822,40823",
+    "-F",
+    "dn"
+  ],
+  "captured_at": "2026-09-23T09:15:10",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "p40822\nf4\nd0x1028560ce0b1873\nn->0xe3c4c3eaaa332d9f\nf8\nd0xf2afa5c29037f629\nn->0x218bd625e163f6ac\nf9\nd0x218bd625e163f6ac\nn->0xf2afa5c29037f629\nf10\nd0xf2afa5c29037f629\nn->0x218bd625e163f6ac\nf11\nd0x1028560ce0b1873\nn->0xe3c4c3eaaa332d9f\np40823\nf4\nd0x89bd8e80b8034479\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr.sock\nf8\nd0x31dc5f4f40e7ae6b\nn->0x47f567c504039433\nf9\nd0x47f567c504039433\nn->0x31dc5f4f40e7ae6b\nf10\nd0x31dc5f4f40e7ae6b\nn->0x47f567c504039433\nf11\nd0x5bcbdf78a622100c\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf13\nd0xe3c4c3eaaa332d9f\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf15\nd0xe3c4c3eaaa332d9f\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf17\nd0xd7c4c134c945e703\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf18\nd0x5bcbdf78a622100c\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf19\nd0x7ce7a9004f2ec4ad\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\nf20\nd0x7ce7a9004f2ec4ad\nn/Users/dev/.config/herdr/sessions/nudge-capture/herdr-client.sock\n",
+  "stderr": ""
+}

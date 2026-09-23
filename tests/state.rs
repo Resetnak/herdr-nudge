@@ -302,6 +302,7 @@ fn job(id: &JobId) -> Job {
         status: AgentStatus::Blocked,
         group: "herdr-nudge-w1:p1".to_owned(),
         bundle_id: None,
+        detect_at_click: false,
         socket_path: std::path::PathBuf::from("/tmp/herdr.sock"),
         notifier_path: std::path::PathBuf::from("/plugin/notifier"),
         created_at_ms: 1_000,

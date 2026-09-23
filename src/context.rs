@@ -55,9 +55,6 @@ pub struct Env {
     /// Goes into the job file when we post a notification. The click runs
     /// later as a new process with none of this environment.
     pub socket_path: PathBuf,
-    /// The terminal the Herdr server was started from, if it was started
-    /// from one. Optional, unlike the rest.
-    pub server_terminal: Option<String>,
 }
 
 /// Kept here so the binary and the tests use the same names.
@@ -69,7 +66,6 @@ const HERDR_PLUGIN_STATE_DIR: &str = "HERDR_PLUGIN_STATE_DIR";
 const HERDR_PLUGIN_CONFIG_DIR: &str = "HERDR_PLUGIN_CONFIG_DIR";
 const HERDR_PLUGIN_ROOT: &str = "HERDR_PLUGIN_ROOT";
 const HERDR_SOCKET_PATH: &str = "HERDR_SOCKET_PATH";
-const CF_BUNDLE_IDENTIFIER: &str = "__CFBundleIdentifier";
 
 impl Env {
     /// `lookup` reads the real environment in the binary and a fixture's env
@@ -90,7 +86,6 @@ impl Env {
             config_dir: get(HERDR_PLUGIN_CONFIG_DIR),
             plugin_root: get(HERDR_PLUGIN_ROOT),
             socket_path: get(HERDR_SOCKET_PATH),
-            server_terminal: lookup(CF_BUNDLE_IDENTIFIER).filter(|v| !v.is_empty()),
         };
 
         if missing.is_empty() {

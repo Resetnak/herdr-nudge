@@ -237,8 +237,16 @@ pub struct Job {
     /// be written back out as the word "unknown".
     pub status: AgentStatus,
     pub group: String,
-    /// `None` means focus the pane without bringing an app forward.
+    /// `None` means focus the pane without bringing an app forward. The
+    /// terminal when this was posted; a click looks again, and uses this
+    /// only if it finds none.
     pub bundle_id: Option<String>,
+    /// Whether a click looks for the attached clients again, those of the
+    /// server behind `socket_path`. False when `default_terminal` named the
+    /// terminal, and for a job written before this field existed; the click
+    /// then raises `bundle_id`.
+    #[serde(default)]
+    pub detect_at_click: bool,
     pub socket_path: PathBuf,
     /// So the click can withdraw the notification.
     pub notifier_path: PathBuf,

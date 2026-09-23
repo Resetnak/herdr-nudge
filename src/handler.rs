@@ -31,9 +31,6 @@ pub struct Deps<'a, R: Runner, S: Spawner> {
     /// Our own binary, for the click command. Must be absolute.
     pub self_bin: &'a Path,
     pub plugin_root: &'a Path,
-    /// The terminal the Herdr server was started from, when the config
-    /// doesn't name one.
-    pub server_terminal: Option<&'a str>,
     pub runner: &'a R,
     pub spawner: &'a S,
     pub now_ms: u64,
@@ -183,20 +180,9 @@ pub fn handle<R: Runner, S: Spawner>(
         return Report::new(outcome, notes);
     }
 
-    let resolution = terminal::resolve(deps.config, deps.server_terminal);
-
-    // What app is in front only matters when the user is on this pane, so the
-    // two `lsappinfo` calls happen only then.
-    let focused = info.as_ref().map(|i| i.focused);
-    if focused == Some(true)
-        && let Some(bundle) = &resolution.bundle_id
-        && terminal::frontmost_bundle_id(deps.runner).as_ref() == Some(bundle)
-    {
-        return Report::new(Outcome::Watching, notes);
-    }
-
     // A status that repeats is normal: reporting metadata alone emits a
-    // status event carrying the unchanged status.
+    // status event carrying the unchanged status. Checked before finding the
+    // terminal, which costs a few subprocesses.
     if let Some(showing) = live_job(deps, event, agent_label, &mut notes) {
         return Report::new(Outcome::AlreadyShowing(showing), notes);
     }
@@ -206,6 +192,19 @@ pub fn handle<R: Runner, S: Spawner>(
             Outcome::NotifierMissing(deps.notifier_bin.to_owned()),
             notes,
         );
+    }
+
+    let resolution = terminal::resolve(deps.config, deps.runner, deps.socket_path, &mut notes);
+
+    // What app is in front only matters when the user is on this pane, so the
+    // two `lsappinfo` calls happen only then.
+    let focused = info.as_ref().map(|i| i.focused);
+    if focused == Some(true)
+        && !resolution.showing.is_empty()
+        && terminal::frontmost_bundle_id(deps.runner)
+            .is_some_and(|front| resolution.showing.contains(&front))
+    {
+        return Report::new(Outcome::Watching, notes);
     }
 
     let job_id = state::new_job_id(deps.now_ms, deps.pid);
@@ -235,6 +234,9 @@ pub fn handle<R: Runner, S: Spawner>(
         status: event.agent_status,
         group: group.clone(),
         bundle_id: resolution.bundle_id.clone(),
+        // The config wins at click time too, so there is nothing to look
+        // for again.
+        detect_at_click: resolution.source != terminal::TerminalSource::DefaultConfig,
         socket_path: deps.socket_path.to_owned(),
         notifier_path: deps.notifier_bin.to_owned(),
         created_at_ms: deps.now_ms,

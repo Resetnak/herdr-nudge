@@ -11,6 +11,9 @@
 //! Nudge name, which the user has no way to connect to what they just
 //! clicked. It touches the state directory and nothing else.
 //!
+//! `pgrep`, `ps`, `lsof` and `lsappinfo`, which find the terminal again, work
+//! under that bare environment too (checked by hand on macOS 26).
+//!
 //! Bringing the pane forward takes two steps: `open -b` raises the terminal,
 //! then the Herdr socket's `pane.focus` moves to the pane. `herdr agent
 //! focus` would be simpler but fails on a plain shell pane.
@@ -23,6 +26,7 @@ use crate::herdr;
 use crate::notifier::Notifier;
 use crate::process::{Runner, Spawner};
 use crate::state::{Job, Loaded, StateDir};
+use crate::terminal;
 
 const OPEN: &str = "/usr/bin/open";
 
@@ -78,7 +82,17 @@ pub fn run<R: Runner, S: Spawner>(
     // retry from.
     clear(state, spawner, &job, &mut notes);
 
-    raise_terminal(runner, job.bundle_id.as_deref(), &mut notes);
+    // Looked for again because the notification can be an hour old, and the
+    // user may have moved to another terminal since. Frontmost right now is
+    // Notification Center or our own app, and neither shows a Herdr client,
+    // so neither can come out of this.
+    let detected = if job.detect_at_click {
+        terminal::detect(runner, &job.socket_path, &mut notes).1
+    } else {
+        None
+    };
+    let bundle_id = detected.or(job.bundle_id);
+    raise_terminal(runner, bundle_id.as_deref(), &mut notes);
 
     let pane_id = job.pane_id;
     match herdr::focus_pane(&job.socket_path, &pane_id, FOCUS_TIMEOUT) {
