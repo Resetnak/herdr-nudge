@@ -58,42 +58,8 @@ fn pane_get_reads_focused() {
     );
 }
 
-#[test]
-fn agent_get_with_and_without_a_session() {
-    let replay = Replay::new([
-        Recorded::cli("agent-get-with-session"),
-        Recorded::cli("agent-get-reported-no-session"),
-    ]);
-
-    let claude = cli(&replay).agent_get("w3:p1").unwrap().unwrap();
-    assert_eq!(claude.agent.as_deref(), Some("claude"));
-    assert!(
-        claude.agent_session.is_some(),
-        "agent-get-with-session: agent_session"
-    );
-
-    let make = cli(&replay).agent_get("w3:p3").unwrap().unwrap();
-    assert_eq!(make.agent.as_deref(), Some("make"));
-    assert!(
-        make.agent_session.is_none(),
-        "agent-get-reported-no-session: agent_session"
-    );
-}
-
-#[test]
-fn agent_get_on_a_plain_shell_is_none_not_an_error() {
-    let recorded = Recorded::cli("agent-get-plain-shell");
-    assert_eq!(
-        recorded.exit_code, 1,
-        "fixture no longer covers the exit 1 case"
-    );
-
-    let replay = Replay::new([recorded]);
-    assert_eq!(cli(&replay).agent_get("w3:p2").unwrap(), None);
-}
-
-/// `agent_not_found` means "no agent" only for `agent get`. On `pane get`
-/// it's an error like any other.
+/// Herdr's error object comes back as an `Api` error, code intact. The
+/// capture is from `agent get`, the only query we have an error reply for.
 #[test]
 fn pane_get_reports_herdr_errors() {
     let replay = Replay::answering(

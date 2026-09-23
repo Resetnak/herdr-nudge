@@ -8,12 +8,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use herdr_nudge::classify::{Classification, ClassifySignal, PaneKind};
+use herdr_nudge::classify::PaneKind;
 use herdr_nudge::cli::JobId;
 use herdr_nudge::click::{self, Outcome};
 use herdr_nudge::event::AgentStatus;
 use herdr_nudge::process::{Output, Runner};
-use herdr_nudge::state::{Job, Loaded, PaneRecord, StateDir, VERSION};
+use herdr_nudge::state::{Job, Loaded, StateDir, VERSION};
 use support::{Recorded, Replay, SocketExchange, Spy, fake_herdr, scratch_dir};
 
 /// A [`Replay`] that also notes when each call was made, so a test can tell
@@ -229,50 +229,12 @@ fn no_herdr_socket_is_not_focused() {
     );
 }
 
-/// Otherwise the terminal we raise would be learned as the workspace's the
-/// next time an event arrives, and Notification Center can still be in
-/// front at that point.
-#[test]
-fn a_click_marks_the_workspace_as_focused_by_us() {
-    let state = state_for("click_marker");
-    let id = job_id();
-    state
-        .save_job(&a_job(&id, 9_000, &no_socket("click_marker")))
-        .expect("save job");
-
-    click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
-
-    let Ok(Loaded::Found(origin)) = state.focus_origin() else {
-        panic!("focus-origin.json should have been written");
-    };
-    assert!(
-        origin.is_recent("w3", 2_000),
-        "workspace w3 should be marked: {origin:?}"
-    );
-    assert!(
-        !origin.is_recent("w1", 2_000),
-        "only the job's workspace should be marked: {origin:?}"
-    );
-}
-
 #[test]
 fn clicking_a_live_job_clears_it() {
     let state = state_for("click_live");
     let id = job_id();
     let job = a_job(&id, 9_000, &no_socket("click_live"));
     state.save_job(&job).expect("save job");
-
-    let mut record = PaneRecord::new(
-        "w3:p1",
-        Some("claude"),
-        Classification {
-            kind: PaneKind::Agent,
-            signal: ClassifySignal::Catalogue,
-        },
-        1_000,
-    );
-    record.live_job = Some(id.to_string());
-    state.save_pane_record(&record).expect("save record");
 
     let spy = Spy::default();
     click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
@@ -290,16 +252,6 @@ fn clicking_a_live_job_clears_it() {
     assert!(
         matches!(state.job(&id), Ok(Loaded::Missing)),
         "the job file should be gone"
-    );
-
-    let Ok(Loaded::Found(after)) = state.pane_record("w3:p1") else {
-        panic!("the pane record should still be there");
-    };
-    assert_eq!(after.live_job, None, "live_job should be cleared");
-    assert_eq!(
-        after.kind,
-        PaneKind::Agent,
-        "the classification should survive a click"
     );
 }
 
@@ -343,27 +295,23 @@ fn a_click_leaves_another_panes_live_job_alone() {
         .save_job(&a_job(&id, 9_000, &no_socket("click_other_pane")))
         .expect("save job");
 
-    let mut other = PaneRecord::new(
-        "w3:p2",
-        Some("make"),
-        Classification {
-            kind: PaneKind::Shell,
-            signal: ClassifySignal::Neither,
-        },
-        1_000,
+    let other_id = JobId::parse("fedcba9876543210").expect("16 hex");
+    let mut other = a_job(&other_id, 9_000, &no_socket("click_other_pane"));
+    other.pane_id = "w3:p2".to_owned();
+    other.group = "herdr-nudge-w3:p2".to_owned();
+    state.save_job(&other).expect("save other job");
+
+    let spy = Spy::default();
+    click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
+
+    assert!(
+        matches!(state.job(&other_id), Ok(Loaded::Found(_))),
+        "w3:p2's job should be untouched"
     );
-    other.live_job = Some("fedcba9876543210".to_owned());
-    state.save_pane_record(&other).expect("save record");
-
-    click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
-
-    let Ok(Loaded::Found(after)) = state.pane_record("w3:p2") else {
-        panic!("the other pane's record should still be there");
-    };
     assert_eq!(
-        after.live_job.as_deref(),
-        Some("fedcba9876543210"),
-        "the other pane's notification should be untouched"
+        Spy::arg_after(&spy.only(), "-remove").as_deref(),
+        Some("herdr-nudge-w3:p1"),
+        "only w3:p1's group should be withdrawn"
     );
 }
 

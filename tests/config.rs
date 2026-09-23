@@ -5,7 +5,7 @@ mod support;
 use std::collections::BTreeSet;
 use std::fs;
 
-use herdr_nudge::config::{Config, DEFAULT_TERMINAL_ALLOWLIST, shell_env};
+use herdr_nudge::config::{Config, shell_env};
 use herdr_nudge::event::AgentStatus;
 use herdr_nudge::herdr::Cli;
 use support::{Recorded, Replay, scratch_dir};
@@ -25,7 +25,6 @@ fn an_empty_file_means_defaults() {
 fn defaults() {
     let c = Config::default();
     assert_eq!(c.default_terminal, None);
-    assert_eq!(c.terminal_allowlist, DEFAULT_TERMINAL_ALLOWLIST);
     assert_eq!(c.notifications.clickable_secs, 3600);
     assert!(c.notifications.sound && c.notifications.agent_logos);
     assert!(c.agents.enabled && c.shell.enabled);
@@ -40,7 +39,6 @@ fn a_full_config_parses() {
     let c = Config::parse(
         r#"
 default_terminal = "com.mitchellh.ghostty"
-terminal_allowlist = ["com.mitchellh.ghostty"]
 
 [notifications]
 clickable_secs = 600
@@ -57,25 +55,19 @@ min_seconds = 5
 statuses = ["done"]
 notify_on_failure_only = true
 ignore_commands = ["vim"]
-ignore_agents = ["make"]
 known_agents_extra = ["aider"]
 known_agents_remove = ["pi"]
-
-[workspaces]
-w8 = "com.googlecode.iterm2"
 "#,
     )
     .unwrap();
 
     assert_eq!(c.default_terminal.as_deref(), Some("com.mitchellh.ghostty"));
-    assert_eq!(c.terminal_allowlist, ["com.mitchellh.ghostty"]);
     assert_eq!(c.notifications.clickable_secs, 600);
     assert!(!c.notifications.sound);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked]);
     assert!(!c.shell.enabled);
     assert_eq!(c.shell.statuses, [AgentStatus::Done]);
     assert_eq!(c.shell.known_agents_extra, ["aider"]);
-    assert_eq!(c.workspaces["w8"], "com.googlecode.iterm2");
 }
 
 #[test]
@@ -108,8 +100,6 @@ fn an_unknown_status_is_an_error_not_unknown() {
 #[test]
 fn an_empty_bundle_id_is_an_error() {
     assert!(Config::parse("default_terminal = \"\"\n").is_err());
-    let err = Config::parse("[workspaces]\nw1 = \"\"\n").unwrap_err();
-    assert!(err.contains("w1"), "{err}");
 }
 
 #[test]

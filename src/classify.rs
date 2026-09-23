@@ -29,7 +29,6 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::state::PaneRecord;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,8 +39,7 @@ pub enum PaneKind {
 
 /// What decided it. `doctor` prints this, so a pane classified the wrong way
 /// says why rather than leaving the user guessing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassifySignal {
     /// `known_agents_extra` or `known_agents_remove` named the label, and
     /// Herdr's own list would have said otherwise.
@@ -52,10 +50,8 @@ pub enum ClassifySignal {
     AgentSession,
     /// Both signals were checked and neither fired: a shell command.
     Neither,
-    /// The pane query failed and there was nothing to fall back on.
+    /// The pane query failed and the label isn't in either list.
     Unavailable,
-    /// The pane query failed, so the last answer for this pane stands.
-    Remembered,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,16 +75,11 @@ impl Classification {
 ///
 /// `session` is whether `pane get` found an `agent_session` — `None` when the
 /// query failed, which is different from finding no session.
-///
-/// `remembered` is only consulted then, and only if it is about the same
-/// agent label: a pane that handed over from `claude` to `make` is a new
-/// identity, and the old answer says nothing about it.
 pub fn classify(
     config: &Config,
     manifests: &BTreeSet<String>,
     agent_label: Option<&str>,
     session: Option<bool>,
-    remembered: Option<&PaneRecord>,
 ) -> Classification {
     if let Some(label) = agent_label {
         // Checked before everything else, because it is the only way to stop
@@ -108,13 +99,14 @@ pub fn classify(
     match session {
         Some(true) => decided(PaneKind::Agent, ClassifySignal::AgentSession),
         Some(false) => decided(PaneKind::Shell, ClassifySignal::Neither),
-        None => match remembered.filter(|r| r.agent.as_deref() == agent_label) {
-            Some(record) => decided(record.kind, ClassifySignal::Remembered),
-            // A pane Herdr recognises as an agent never gets this far: the
-            // manifests answered without asking anything. What is left is a
-            // label Herdr doesn't know, which is what a shell hook reports.
-            None => decided(PaneKind::Shell, ClassifySignal::Unavailable),
-        },
+        // Once `agents-cache.json` exists, a pane Herdr recognises as an
+        // agent never gets this far: the manifests answered without asking
+        // anything. What is left is a label Herdr doesn't know, which is what
+        // a shell hook reports. An agent with its own integration but no
+        // manifest lands here too, and so does every agent while nothing has
+        // written the cache yet. Each reads as a shell command until the
+        // query works again.
+        None => decided(PaneKind::Shell, ClassifySignal::Unavailable),
     }
 }
 

@@ -14,21 +14,11 @@ pub enum Mode {
     /// Herdr's startup hook.
     Cleanup,
     Doctor,
-    Bind(Bind),
     Test {
         shell: bool,
     },
     Help,
     Version,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Bind {
-    List,
-    Set {
-        workspace_id: String,
-        bundle_id: String,
-    },
 }
 
 /// A job id: 16 lowercase hex characters.
@@ -67,7 +57,6 @@ pub enum ParseError {
     BadJobId(String),
     MissingValue(&'static str),
     UnexpectedArg { mode: &'static str, arg: String },
-    Usage(&'static str),
 }
 
 impl fmt::Display for ParseError {
@@ -81,7 +70,6 @@ impl fmt::Display for ParseError {
             ParseError::UnexpectedArg { mode, arg } => {
                 write!(f, "unexpected argument for {mode}: {arg}")
             }
-            ParseError::Usage(what) => write!(f, "{what}"),
         }
     }
 }
@@ -94,9 +82,7 @@ herdr-nudge — macOS notifications for Herdr panes
   herdr-nudge                       event hook (invoked by Herdr)
   herdr-nudge --click <16 hex>      focus the pane a notification was for
   herdr-nudge --cleanup             startup hook
-  herdr-nudge doctor                diagnose config, bundle and bindings
-  herdr-nudge bind <ws> <bundle>    pin a workspace to a terminal
-  herdr-nudge bind --list           show the resolution table
+  herdr-nudge doctor                diagnose config and bundle
   herdr-nudge test [--shell]        post a real notification
 ";
 
@@ -128,26 +114,6 @@ where
             no_more(rest, "doctor")?;
             Ok(Mode::Doctor)
         }
-        "bind" => match rest.next() {
-            None => Err(ParseError::Usage(
-                "bind wants <workspace> <bundle-id>, or --list",
-            )),
-            Some("--list") => {
-                no_more(rest, "bind --list")?;
-                Ok(Mode::Bind(Bind::List))
-            }
-            // Without this a mistyped flag would be taken as a workspace
-            // name and written into the config.
-            Some(arg) if arg.starts_with('-') => Err(ParseError::UnknownArg(arg.to_owned())),
-            Some(workspace_id) => {
-                let bundle_id = rest.next().ok_or(ParseError::MissingValue("<bundle-id>"))?;
-                no_more(rest, "bind")?;
-                Ok(Mode::Bind(Bind::Set {
-                    workspace_id: workspace_id.to_owned(),
-                    bundle_id: bundle_id.to_owned(),
-                }))
-            }
-        },
         "test" => {
             let mut shell = false;
             for arg in rest {

@@ -4,9 +4,8 @@
 //! don't need answered. An event hook runs on every status change, including
 //! the `working` churn of an agent that is just thinking, so the first thing
 //! checked is whether any trigger set names this status at all. Past that
-//! point one `herdr pane get` answers three questions at once: is the user
-//! looking at this pane, is it an agent or a shell command, and is this a
-//! moment we could learn the workspace's terminal from.
+//! point one `herdr pane get` answers two questions at once: is the user
+//! looking at this pane, and is it an agent or a shell command.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -20,8 +19,8 @@ use crate::event::{AgentStatus, Envelope, EventData, StatusEvent};
 use crate::herdr::{Cli, PaneInfo};
 use crate::notifier::{self, Notifier, Post};
 use crate::process::{Runner, Spawner};
-use crate::state::{self, Job, Loaded, PaneRecord, StateDir, VERSION};
-use crate::terminal::{self, Resolution};
+use crate::state::{self, Job, Loaded, StateDir, VERSION};
+use crate::terminal;
 
 pub struct Deps<'a, R: Runner, S: Spawner> {
     pub config: &'a Config,
@@ -32,6 +31,9 @@ pub struct Deps<'a, R: Runner, S: Spawner> {
     /// Our own binary, for the click command. Must be absolute.
     pub self_bin: &'a Path,
     pub plugin_root: &'a Path,
+    /// The terminal the Herdr server was started from, when the config
+    /// doesn't name one.
+    pub server_terminal: Option<&'a str>,
     pub runner: &'a R,
     pub spawner: &'a S,
     pub now_ms: u64,
@@ -52,7 +54,8 @@ pub enum Outcome {
         kind: PaneKind,
         status: AgentStatus,
     },
-    IgnoredAgent(String),
+    /// The shell command is in `ignore_commands`.
+    IgnoredCommand(String),
     /// `notify_on_failure_only` is on and the command succeeded.
     NotAFailure,
     /// The user is looking at the pane in the frontmost terminal.
@@ -162,19 +165,6 @@ pub fn handle<R: Runner, S: Spawner>(
         }
     };
 
-    let remembered = match deps.state.pane_record(&event.pane_id) {
-        Ok(Loaded::Found(record)) => Some(record),
-        Ok(Loaded::Recovered(r)) => {
-            notes.push(format!("pane record unreadable ({}), ignored", r.reason));
-            None
-        }
-        Ok(Loaded::Missing) => None,
-        Err(e) => {
-            notes.push(format!("pane record: {e}"));
-            None
-        }
-    };
-
     // The event's own label is the one this status is about. A pane that has
     // just been released has none, and then the query's is the best we have.
     let agent_label = event
@@ -187,52 +177,31 @@ pub fn handle<R: Runner, S: Spawner>(
         &manifests(deps.state, &mut notes),
         agent_label,
         info.as_ref().map(PaneInfo::has_agent_session),
-        remembered.as_ref(),
     );
 
-    let mut record = PaneRecord::new(&event.pane_id, agent_label, classification, deps.now_ms);
-    // Carry the live notification across, but only if it belongs to this same
-    // agent identity.
-    record.live_job = remembered
-        .as_ref()
-        .filter(|r| r.is_about(agent_label))
-        .and_then(|r| r.live_job.clone());
-
-    let decision = decide(deps.config, classification, event, agent_label);
-    if let Some(outcome) = decision {
-        save_record(deps.state, &record, &mut notes);
+    if let Some(outcome) = decide(deps.config, classification, event, agent_label) {
         return Report::new(outcome, notes);
     }
 
-    // Learning and the visibility check both want to know what app is in
-    // front, and both only care when the user is on this pane. So the two
-    // `lsappinfo` calls happen at most once, and only then.
+    let resolution = terminal::resolve(deps.config, deps.server_terminal);
+
+    // What app is in front only matters when the user is on this pane, so the
+    // two `lsappinfo` calls happen only then.
     let focused = info.as_ref().map(|i| i.focused);
-    let frontmost = if focused == Some(true) {
-        terminal::frontmost_bundle_id(deps.runner)
-    } else {
-        None
-    };
-
-    let resolution = resolve_terminal(deps, event, focused, frontmost.as_deref(), &mut notes);
-
     if focused == Some(true)
-        && let (Some(front), Some(bundle)) = (&frontmost, &resolution.bundle_id)
-        && front == bundle
+        && let Some(bundle) = &resolution.bundle_id
+        && terminal::frontmost_bundle_id(deps.runner).as_ref() == Some(bundle)
     {
-        save_record(deps.state, &record, &mut notes);
         return Report::new(Outcome::Watching, notes);
     }
 
     // A status that repeats is normal: reporting metadata alone emits a
     // status event carrying the unchanged status.
-    if let Some(showing) = live_job(deps, &record, event, agent_label) {
-        save_record(deps.state, &record, &mut notes);
+    if let Some(showing) = live_job(deps, event, agent_label, &mut notes) {
         return Report::new(Outcome::AlreadyShowing(showing), notes);
     }
 
     if !deps.notifier_bin.is_file() {
-        save_record(deps.state, &record, &mut notes);
         return Report::new(
             Outcome::NotifierMissing(deps.notifier_bin.to_owned()),
             notes,
@@ -243,7 +212,6 @@ pub fn handle<R: Runner, S: Spawner>(
     let execute = match notifier::click_command(deps.self_bin, &job_id) {
         Ok(execute) => execute,
         Err(e) => {
-            save_record(deps.state, &record, &mut notes);
             return Report::new(Outcome::CannotBuildClick(e.to_string()), notes);
         }
     };
@@ -284,12 +252,9 @@ pub fn handle<R: Runner, S: Spawner>(
     // old job is dropped only after this one is safely on disk, so a failed
     // write leaves the notification that is already up still clickable.
     if let Err(e) = deps.state.save_job(&job) {
-        save_record(deps.state, &record, &mut notes);
         return Report::new(Outcome::Failed(format!("could not write job: {e}")), notes);
     }
     drop_other_jobs(deps, &event.pane_id, &job_id, &mut notes);
-    record.live_job = Some(job.id.clone());
-    save_record(deps.state, &record, &mut notes);
 
     let image = logo_for(deps, classification.kind, agent_label);
     let notifier = Notifier {
@@ -312,8 +277,6 @@ pub fn handle<R: Runner, S: Spawner>(
         if let Err(e) = deps.state.delete_job(&job_id) {
             notes.push(format!("could not delete unposted job {job_id}: {e}"));
         }
-        record.live_job = None;
-        save_record(deps.state, &record, &mut notes);
         return Report::new(
             Outcome::Failed(format!("could not start the notifier: {e}")),
             notes,
@@ -360,13 +323,13 @@ fn decide(
         });
     }
 
-    // `ignore_agents` sits under `[shell]` and is keyed on the label a
-    // reporter sends, so it only applies to shell panes.
+    // Checked here rather than left to our zsh hook, because any shell hook
+    // can report one of these. A shell reporter's label is its command name.
     if classification.kind == PaneKind::Shell
         && let Some(label) = agent_label
-        && config.shell.ignore_agents.iter().any(|a| a == label)
+        && config.shell.ignore_commands.iter().any(|c| c == label)
     {
-        return Some(Outcome::IgnoredAgent(label.to_owned()));
+        return Some(Outcome::IgnoredCommand(label.to_owned()));
     }
 
     // The label survives Herdr rewriting `idle` to `done`, so `idle` is the
@@ -391,80 +354,44 @@ fn manifests(state: &StateDir, notes: &mut Vec<String>) -> BTreeSet<String> {
     }
 }
 
-/// Learns the workspace's terminal if this is a moment we can trust, then
-/// resolves it. Config always wins, so learning can only fill a gap.
-fn resolve_terminal<R: Runner, S: Spawner>(
-    deps: &Deps<R, S>,
-    event: &StatusEvent,
-    focused: Option<bool>,
-    frontmost: Option<&str>,
-    notes: &mut Vec<String>,
-) -> Resolution {
-    let mut memory = match deps.state.terminal_memory() {
-        Ok(loaded) => loaded.into_value(),
-        Err(e) => {
-            notes.push(format!("terminal memory: {e}"));
-            Default::default()
-        }
-    };
-    let origin = match deps.state.focus_origin() {
-        Ok(loaded) => loaded.into_value(),
-        Err(e) => {
-            notes.push(format!("focus origin: {e}"));
-            Default::default()
-        }
-    };
-
-    match terminal::learn(
-        deps.config,
-        &memory,
-        &origin,
-        &event.workspace_id,
-        deps.now_ms,
-        || focused,
-        || frontmost.map(str::to_owned),
-    ) {
-        Ok(bundle_id) => {
-            memory.set(&event.workspace_id, &bundle_id, deps.now_ms);
-            match deps.state.save_terminal_memory(&memory) {
-                Ok(()) => notes.push(format!(
-                    "learned {} for workspace {}",
-                    bundle_id, event.workspace_id
-                )),
-                Err(e) => notes.push(format!("could not save learned terminal: {e}")),
-            }
-        }
-        Err(skip) => notes.push(format!("not learning: {skip:?}")),
-    }
-
-    terminal::resolve(deps.config, &memory, &event.workspace_id)
-}
-
 /// The job id of a notification already showing for this pane, agent and
 /// status.
+///
+/// Only the pane's newest job counts, because that is the one on screen: the
+/// group is per pane. An older job is normally deleted when a newer one is
+/// posted, but if that delete failed, the leftover must not pass for what is
+/// showing.
 fn live_job<R: Runner, S: Spawner>(
     deps: &Deps<R, S>,
-    record: &PaneRecord,
     event: &StatusEvent,
     agent_label: Option<&str>,
+    notes: &mut Vec<String>,
 ) -> Option<String> {
-    let id = JobId::parse(record.live_job.as_deref()?).ok()?;
-    let Ok(Loaded::Found(job)) = deps.state.job(&id) else {
-        return None;
+    let ids = match deps.state.job_ids() {
+        Ok(ids) => ids,
+        Err(e) => {
+            notes.push(format!("could not list jobs: {e}"));
+            return None;
+        }
     };
-    let same = job.blocks_repeat(deps.now_ms)
-        && job.status == event.agent_status
-        && job.agent_label.as_deref() == agent_label;
-    same.then_some(job.id)
+    let newest = ids
+        .into_iter()
+        .filter_map(|id| match deps.state.job(&id) {
+            Ok(Loaded::Found(job)) if job.pane_id == event.pane_id => Some(job),
+            _ => None,
+        })
+        .max_by_key(|job| job.created_at_ms)?;
+    let same = newest.blocks_repeat(deps.now_ms)
+        && newest.status == event.agent_status
+        && newest.agent_label.as_deref() == agent_label;
+    same.then_some(newest.id)
 }
 
 /// Drops every job for this pane except the one just written.
 ///
-/// Keying this on the pane rather than on the pane record's `live_job` is
-/// what handles a handover: when `claude` gives the pane up and `make`
-/// claims it, the record is about a different identity and carries no job
-/// id, so the old job would be left behind. The group is per-pane, so its
-/// banner has already been replaced on screen — but the file would still be
+/// This includes a job from another agent identity, as when `claude` gives
+/// the pane up and `make` claims it. The group is per-pane, so that banner
+/// has already been replaced on screen, but a job left behind would still be
 /// swept later, and the sweep would then `-remove` the group this new
 /// notification is using.
 fn drop_other_jobs<R: Runner, S: Spawner>(
@@ -524,10 +451,4 @@ fn logo_for<R: Runner, S: Spawner>(
         .join("icons/agents")
         .join(format!("{label}.png"));
     path.is_file().then_some(path)
-}
-
-fn save_record(state: &StateDir, record: &PaneRecord, notes: &mut Vec<String>) {
-    if let Err(e) = state.save_pane_record(record) {
-        notes.push(format!("could not save pane {}: {e}", record.pane_id));
-    }
 }

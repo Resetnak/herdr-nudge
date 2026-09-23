@@ -9,7 +9,6 @@ use std::path::Path;
 use herdr_nudge::classify::{Classification, ClassifySignal, PaneKind, classify};
 use herdr_nudge::config::Config;
 use herdr_nudge::herdr::{Cli, PaneInfo};
-use herdr_nudge::state::PaneRecord;
 use support::{Recorded, Replay};
 
 const HERDR: &str = "/Users/dev/.local/bin/herdr";
@@ -26,15 +25,14 @@ fn pane_get(fixture: &str, pane_id: &str) -> PaneInfo {
     .unwrap_or_else(|e| panic!("{fixture}: {e}"))
 }
 
-fn agent_get(fixture: &str, pane_id: &str) -> Option<PaneInfo> {
+/// `agent get`'s reply read straight from the capture. Nothing in the crate
+/// runs `agent get`; this is only here to compare its shape with `pane get`.
+fn agent_get(fixture: &str) -> PaneInfo {
     let recorded = Recorded::cli(fixture);
-    let replay = Replay::answering("herdr", &["agent", "get", pane_id], &recorded);
-    Cli {
-        bin: Path::new(HERDR),
-        runner: &replay,
-    }
-    .agent_get(pane_id)
-    .unwrap_or_else(|e| panic!("{fixture}: {e}"))
+    let body: serde_json::Value =
+        serde_json::from_str(&recorded.stdout).unwrap_or_else(|e| panic!("{fixture}: stdout: {e}"));
+    serde_json::from_value(body["result"]["agent"].clone())
+        .unwrap_or_else(|e| panic!("{fixture}: result.agent: {e}"))
 }
 
 /// Herdr's own agent labels, as `server agent-manifests` returned them.
@@ -53,7 +51,6 @@ fn of(pane: &PaneInfo) -> Classification {
         &manifests(),
         pane.agent.as_deref(),
         Some(pane.has_agent_session()),
-        None,
     )
 }
 
@@ -98,15 +95,15 @@ fn a_reported_command_is_a_shell() {
 #[test]
 fn pane_get_and_agent_get_classify_a_reporter_the_same_way() {
     let from_pane = pane_get("pane-get-reported-no-session", "w3:p2");
-    let from_agent = agent_get("agent-get-reported-no-session", "w3:p3")
-        .expect("agent-get-reported-no-session: a claimed pane has an agent");
+    let from_agent = agent_get("agent-get-reported-no-session");
 
     assert!(from_pane.agent.is_some() && from_agent.agent.is_some());
     assert!(!from_pane.has_agent_session() && !from_agent.has_agent_session());
     assert_eq!(of(&from_pane), of(&from_agent));
 
+    let plain = Recorded::cli("agent-get-plain-shell");
     assert!(
-        agent_get("agent-get-plain-shell", "w3:p2").is_none(),
+        plain.exit_code == 1 && plain.stderr.contains("\"agent_not_found\""),
         "agent-get-plain-shell: agent get has no answer for an unclaimed pane"
     );
     let unclaimed = pane_get("pane-get-unfocused", "w3:p2");
@@ -153,7 +150,6 @@ fn an_agent_herdr_does_not_know_is_found_by_its_session() {
             &empty,
             pane.agent.as_deref(),
             Some(pane.has_agent_session()),
-            None,
         ),
         Classification {
             kind: PaneKind::Agent,
@@ -171,7 +167,6 @@ fn the_catalogue_answers_before_the_session_is_looked_at() {
             &manifests(),
             Some("claude"),
             Some(false),
-            None,
         ),
         Classification {
             kind: PaneKind::Agent,
@@ -184,7 +179,7 @@ fn the_catalogue_answers_before_the_session_is_looked_at() {
 fn config_can_force_a_command_to_count_as_an_agent() {
     let config = Config::parse("[shell]\nknown_agents_extra = [\"make\"]\n").unwrap();
     assert_eq!(
-        classify(&config, &manifests(), Some("make"), Some(false), None),
+        classify(&config, &manifests(), Some("make"), Some(false)),
         Classification {
             kind: PaneKind::Agent,
             signal: ClassifySignal::ConfigOverride,
@@ -198,13 +193,7 @@ fn config_can_force_a_pane_with_a_session_to_count_as_a_shell() {
     let pane = pane_get("pane-get-focused", "w3:p1");
     assert!(pane.has_agent_session());
     assert_eq!(
-        classify(
-            &config,
-            &manifests(),
-            pane.agent.as_deref(),
-            Some(true),
-            None
-        ),
+        classify(&config, &manifests(), pane.agent.as_deref(), Some(true)),
         Classification {
             kind: PaneKind::Shell,
             signal: ClassifySignal::ConfigOverride,
@@ -213,66 +202,25 @@ fn config_can_force_a_pane_with_a_session_to_count_as_a_shell() {
     );
 }
 
-fn remembered(agent: Option<&str>, kind: PaneKind) -> PaneRecord {
-    PaneRecord::new(
-        "w3:p1",
-        agent,
-        Classification {
-            kind,
-            signal: ClassifySignal::AgentSession,
-        },
-        1_000,
-    )
-}
-
+/// With no answer from `pane get`, only the catalogue can still say Agent.
 #[test]
-fn a_failed_pane_query_falls_back_to_the_last_answer() {
-    let last = remembered(Some("aider"), PaneKind::Agent);
+fn a_pane_we_could_not_ask_about_is_a_shell_unless_catalogued() {
     assert_eq!(
-        classify(
-            &Config::default(),
-            &manifests(),
-            Some("aider"),
-            None,
-            Some(&last),
-        ),
+        classify(&Config::default(), &manifests(), Some("claude"), None),
         Classification {
             kind: PaneKind::Agent,
-            signal: ClassifySignal::Remembered,
+            signal: ClassifySignal::Catalogue,
         }
     );
-}
-
-#[test]
-fn an_answer_about_another_agent_is_not_reused() {
-    let last = remembered(Some("claude"), PaneKind::Agent);
     assert_eq!(
-        classify(
-            &Config::default(),
-            &manifests(),
-            Some("make"),
-            None,
-            Some(&last),
-        ),
-        Classification {
-            kind: PaneKind::Shell,
-            signal: ClassifySignal::Unavailable,
-        },
-        "the pane handed over from claude to make"
-    );
-}
-
-#[test]
-fn a_pane_we_could_not_ask_about_is_a_shell() {
-    assert_eq!(
-        classify(&Config::default(), &manifests(), Some("make"), None, None),
+        classify(&Config::default(), &manifests(), Some("make"), None),
         Classification {
             kind: PaneKind::Shell,
             signal: ClassifySignal::Unavailable,
         }
     );
     assert_eq!(
-        classify(&Config::default(), &manifests(), None, None, None),
+        classify(&Config::default(), &manifests(), None, None),
         Classification {
             kind: PaneKind::Shell,
             signal: ClassifySignal::Unavailable,
@@ -296,7 +244,7 @@ fn the_config_lists_decide_the_same_labels_as_the_shared_catalogue() {
     labels.extend(["aider", "both", "pi", "make", "sudo"]);
     for label in labels {
         // No session, so only the labels can decide.
-        let kind = classify(&config, &manifests, Some(label), Some(false), None).kind;
+        let kind = classify(&config, &manifests, Some(label), Some(false)).kind;
         assert_eq!(
             kind == PaneKind::Agent,
             catalogue.contains(label),
@@ -329,7 +277,6 @@ fn an_explicit_null_session_is_no_session() {
             &BTreeSet::new(),
             pane.agent.as_deref(),
             Some(pane.has_agent_session()),
-            None,
         ),
         Classification {
             kind: PaneKind::Shell,

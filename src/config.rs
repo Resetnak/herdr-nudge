@@ -5,7 +5,7 @@
 //! ignored, so a typo like `defualt_terminal` shows up instead of silently
 //! doing nothing.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -17,29 +17,13 @@ use crate::event::AgentStatus;
 
 pub const FILE_NAME: &str = "config.toml";
 
-/// The terminals Herdr 0.9.0 itself recognises (hardcoded in its macOS
-/// platform code). Starting from the same list means we only learn a
-/// terminal Herdr would also call one.
-pub const DEFAULT_TERMINAL_ALLOWLIST: [&str; 6] = [
-    "com.apple.Terminal",
-    "com.github.wez.wezterm",
-    "com.googlecode.iterm2",
-    "com.mitchellh.ghostty",
-    "org.alacritty",
-    "net.kovidgoyal.kitty",
-];
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub default_terminal: Option<String>,
-    /// Replaces the default list rather than adding to it.
-    pub terminal_allowlist: Vec<String>,
     pub notifications: Notifications,
     pub agents: Agents,
     pub shell: Shell,
-    /// Workspace id to bundle id, e.g. `w8 = "com.mitchellh.ghostty"`.
-    pub workspaces: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -72,26 +56,12 @@ pub struct Shell {
     #[serde(deserialize_with = "statuses")]
     pub statuses: Vec<AgentStatus>,
     pub notify_on_failure_only: bool,
+    /// Matched against the label a shell hook reports, which is its command
+    /// name, and only for panes classified as shell commands. Also written
+    /// into `shell.env` for our zsh hook.
     pub ignore_commands: Vec<String>,
-    pub ignore_agents: Vec<String>,
     pub known_agents_extra: Vec<String>,
     pub known_agents_remove: Vec<String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            default_terminal: None,
-            terminal_allowlist: DEFAULT_TERMINAL_ALLOWLIST
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            notifications: Notifications::default(),
-            agents: Agents::default(),
-            shell: Shell::default(),
-            workspaces: BTreeMap::new(),
-        }
-    }
 }
 
 impl Default for Notifications {
@@ -124,7 +94,6 @@ impl Default for Shell {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
-            ignore_agents: Vec::new(),
             known_agents_extra: Vec::new(),
             known_agents_remove: Vec::new(),
         }
@@ -193,11 +162,6 @@ impl Config {
     fn check(&self) -> Result<(), String> {
         if self.default_terminal.as_deref().is_some_and(str::is_empty) {
             return Err("default_terminal is empty".to_owned());
-        }
-        for (workspace, bundle_id) in &self.workspaces {
-            if bundle_id.is_empty() {
-                return Err(format!("[workspaces] {workspace} is empty"));
-            }
         }
         Ok(())
     }

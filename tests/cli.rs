@@ -1,6 +1,6 @@
 //! Argument parsing.
 
-use herdr_nudge::cli::{Bind, JobId, Mode, ParseError, parse};
+use herdr_nudge::cli::{JobId, Mode, ParseError, parse};
 
 #[test]
 fn no_arguments_is_an_event_hook() {
@@ -66,36 +66,9 @@ fn the_remaining_modes_parse() {
     assert_eq!(parse(["doctor"]), Ok(Mode::Doctor));
     assert_eq!(parse(["test"]), Ok(Mode::Test { shell: false }));
     assert_eq!(parse(["test", "--shell"]), Ok(Mode::Test { shell: true }));
-    assert_eq!(parse(["bind", "--list"]), Ok(Mode::Bind(Bind::List)));
-    assert_eq!(
-        parse(["bind", "w1", "com.mitchellh.ghostty"]),
-        Ok(Mode::Bind(Bind::Set {
-            workspace_id: "w1".into(),
-            bundle_id: "com.mitchellh.ghostty".into()
-        }))
-    );
     assert_eq!(parse(["--help"]), Ok(Mode::Help));
     assert_eq!(parse(["-h"]), Ok(Mode::Help));
     assert_eq!(parse(["--version"]), Ok(Mode::Version));
-}
-
-#[test]
-fn bind_without_a_bundle_id_is_refused() {
-    assert!(matches!(parse(["bind"]), Err(ParseError::Usage(_))));
-    assert_eq!(
-        parse(["bind", "w1"]),
-        Err(ParseError::MissingValue("<bundle-id>"))
-    );
-}
-
-/// A mistyped flag would otherwise become a workspace name and end up in the
-/// config.
-#[test]
-fn bind_refuses_a_flag_where_a_workspace_belongs() {
-    assert_eq!(
-        parse(["bind", "--lst", "com.example.app"]),
-        Err(ParseError::UnknownArg("--lst".into()))
-    );
 }
 
 /// A typo shouldn't fall through to the event path.
@@ -105,6 +78,7 @@ fn an_unknown_argument_is_refused_rather_than_ignored() {
         parse(["--clean"]),
         Err(ParseError::UnknownArg("--clean".into()))
     );
+    assert_eq!(parse(["bind"]), Err(ParseError::UnknownArg("bind".into())));
     assert_eq!(
         parse(["doctor", "--verbose"]),
         Err(ParseError::UnexpectedArg {

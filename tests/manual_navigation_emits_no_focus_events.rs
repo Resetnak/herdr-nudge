@@ -1,8 +1,7 @@
 //! Moving around Herdr by hand produces no focus events.
 //!
-//! This rules out learning a workspace's terminal from `pane.focused`: the
-//! only one we'll ever see is the one our own click causes, so a plugin that
-//! waited for them would never learn anything.
+//! So nothing can hang off `pane.focused`: the only one we'll ever see is
+//! the one our own click causes, never the user coming back to a pane.
 //!
 //! The capture is someone navigating for three minutes, first with the mouse
 //! and then the keyboard, across panes, tabs and workspaces, marking each

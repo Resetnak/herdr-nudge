@@ -28,6 +28,7 @@ struct Harness {
     notifier_bin: PathBuf,
     self_bin: PathBuf,
     socket: PathBuf,
+    server_terminal: Option<String>,
     now_ms: u64,
 }
 
@@ -53,6 +54,7 @@ impl Harness {
             notifier_bin,
             self_bin,
             socket: dir.join("herdr.sock"),
+            server_terminal: None,
             now_ms: now_ms(),
         }
     }
@@ -78,6 +80,7 @@ impl Harness {
             notifier_bin: &self.notifier_bin,
             self_bin: &self.self_bin,
             plugin_root: &self.plugin_root,
+            server_terminal: self.server_terminal.as_deref(),
             runner: &self.runner,
             spawner: &self.spy,
             now_ms: self.now_ms,
@@ -262,6 +265,36 @@ fn blocked_then_done_posts_twice() {
     );
 }
 
+/// If deleting the superseded `blocked` job failed, it is still on disk when
+/// the pane goes `blocked` again. The `done` banner is what's showing, so
+/// the new `blocked` must post rather than match the leftover.
+#[test]
+fn a_leftover_older_job_does_not_suppress_a_repeat() {
+    let mut harness = Harness::answering("leftover_job", "w1:p1", "pane-get-unfocused");
+    harness.remember_agents(&["claude"]);
+
+    let Outcome::Posted(blocked) = harness.handle("agent/blocked") else {
+        panic!("agent/blocked did not post");
+    };
+    let Ok(Loaded::Found(leftover)) = harness.state.job(&blocked.job_id) else {
+        panic!("no job file for agent/blocked");
+    };
+    harness.now_ms += 1_000;
+    assert!(matches!(harness.handle("agent/done"), Outcome::Posted(_)));
+    // Put the blocked job back, as if its delete had failed.
+    harness
+        .state
+        .save_job(&leftover)
+        .expect("restore leftover job");
+
+    harness.now_ms += 1_000;
+    let again = harness.handle("agent/blocked");
+    assert!(
+        matches!(again, Outcome::Posted(_)),
+        "agent/blocked after done, with the old blocked job left over: {again:?}"
+    );
+}
+
 /// Focused pane plus the bound terminal in front means the user is looking
 /// at it.
 #[test]
@@ -289,6 +322,48 @@ fn a_pane_the_user_is_watching_stays_quiet() {
     assert!(
         harness.spy.spawns.borrow().is_empty(),
         "nothing should have been posted"
+    );
+}
+
+/// With no `default_terminal`, the terminal the server was started from is
+/// what counts as "the user is looking", and what a click raises.
+#[test]
+fn the_server_terminal_stands_in_for_default_terminal() {
+    let mut harness = Harness::new("server_terminal_watching", Vec::new());
+    let mut pane_get = Recorded::cli("pane-get-focused");
+    pane_get.argv = ["herdr", "pane", "get", "w1:p1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    harness.runner = Replay::new(vec![
+        pane_get,
+        Recorded::sys("lsappinfo-front"),
+        Recorded::sys("lsappinfo-bundleid-ghostty"),
+    ]);
+    harness.server_terminal = Some("com.mitchellh.ghostty".to_owned());
+    harness.remember_agents(&["claude"]);
+
+    assert_eq!(
+        harness.handle("agent/blocked"),
+        Outcome::Watching,
+        "pane-get-focused with Ghostty in front and in the server env"
+    );
+
+    let harness = Harness {
+        server_terminal: Some("com.mitchellh.ghostty".to_owned()),
+        ..Harness::answering("server_terminal_job", "w1:p1", "pane-get-unfocused")
+    };
+    harness.remember_agents(&["claude"]);
+    let Outcome::Posted(posted) = harness.handle("agent/blocked") else {
+        panic!("agent/blocked on an unfocused pane did not post");
+    };
+    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
+        panic!("no job file");
+    };
+    assert_eq!(
+        job.bundle_id.as_deref(),
+        Some("com.mitchellh.ghostty"),
+        "job bundle_id, from the server env"
     );
 }
 
@@ -343,6 +418,28 @@ fn a_shell_command_is_classified_and_titled_as_one() {
     assert_eq!(posted.title, "make · failed", "shell title");
 }
 
+/// The command name is the label a shell reporter sends, `make` in this
+/// capture. An agent pane with the same label is not affected.
+#[test]
+fn an_ignored_command_is_dropped_for_shell_panes_only() {
+    let mut harness = Harness::answering("ignored_command", "w3:p3", "pane-get-unfocused");
+    harness.config.shell.ignore_commands = vec!["make".to_owned()];
+    assert_eq!(
+        harness.handle("shell/done-unwatched-failed"),
+        Outcome::IgnoredCommand("make".to_owned()),
+        "shell/done-unwatched-failed: make is in ignore_commands"
+    );
+
+    let mut harness = Harness::answering("ignored_command_agent", "w1:p1", "pane-get-unfocused");
+    harness.config.shell.ignore_commands = vec!["claude".to_owned()];
+    harness.remember_agents(&["claude"]);
+    let outcome = harness.handle("agent/blocked");
+    assert!(
+        matches!(outcome, Outcome::Posted(_)),
+        "agent/blocked: ignore_commands must not mute an agent: {outcome:?}"
+    );
+}
+
 #[test]
 fn notify_on_failure_only_drops_a_command_that_worked() {
     let mut harness = Harness::answering("failure_only", "w3:p4", "pane-get-unfocused");
@@ -379,18 +476,6 @@ fn a_disabled_half_never_notifies() {
         harness.handle("agent/blocked"),
         Outcome::StatusNotWatched(AgentStatus::Blocked),
         "with agents off, blocked is in neither enabled trigger set"
-    );
-}
-
-#[test]
-fn an_ignored_agent_label_is_dropped() {
-    let mut harness = Harness::answering("ignored_agent", "w3:p3", "pane-get-unfocused");
-    harness.config.shell.ignore_agents = vec!["make".to_owned()];
-
-    assert_eq!(
-        harness.handle("shell/done-unwatched-failed"),
-        Outcome::IgnoredAgent("make".to_owned()),
-        "make is in ignore_agents"
     );
 }
 
@@ -614,9 +699,8 @@ fn an_expired_job_never_blocks_a_repeat() {
 }
 
 /// A pane that hands over from an agent to a shell reporter has a new agent
-/// identity, so the pane record carries no job id for the old one. The old
-/// job still has to go: the group is per-pane, so a sweep of it would later
-/// withdraw the notification the new job owns.
+/// identity. The old job still has to go: the group is per-pane, so a sweep
+/// of it would later withdraw the notification the new job owns.
 #[test]
 fn a_handover_leaves_one_job_for_the_pane() {
     let mut harness = Harness::new("handover_one_job", Vec::new());
@@ -670,14 +754,6 @@ fn a_notification_that_could_not_be_posted_leaves_no_job() {
         harness.state.job_ids().unwrap(),
         Vec::new(),
         "no job should be left for a notification that never appeared"
-    );
-
-    let Ok(Loaded::Found(record)) = harness.state.pane_record("w1:p1") else {
-        panic!("the pane record should still be there");
-    };
-    assert_eq!(
-        record.live_job, None,
-        "live_job should not point at a banner that never existed"
     );
 }
 

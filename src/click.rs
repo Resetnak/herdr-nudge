@@ -73,13 +73,11 @@ pub fn run<R: Runner, S: Spawner>(
         return (Outcome::Expired, notes);
     }
 
-    // Cleared before focusing, not after. Our own `pane.focus` makes Herdr
-    // send `pane.focused`, which runs the event hook for this same pane. Once
-    // that hook tidies up live jobs, clearing first leaves it nothing to race
-    // us for.
+    // Cleared before focusing, not after, so a focus that fails still leaves
+    // nothing behind. The banner is gone either way, so there is nothing to
+    // retry from.
     clear(state, spawner, &job, &mut notes);
 
-    mark_focus_origin(state, &job.workspace_id, now_ms, &mut notes);
     raise_terminal(runner, job.bundle_id.as_deref(), &mut notes);
 
     let pane_id = job.pane_id;
@@ -92,24 +90,6 @@ pub fn run<R: Runner, S: Spawner>(
     }
 }
 
-/// Stops the terminal we are about to raise from being learned as this
-/// workspace's. Notification Center can still be frontmost for a moment
-/// after the click, and whatever `open -b` raises is our choice, not
-/// evidence of where the user keeps this workspace.
-fn mark_focus_origin(state: &StateDir, workspace_id: &str, now_ms: u64, notes: &mut Vec<String>) {
-    let mut origin = match state.focus_origin() {
-        Ok(loaded) => loaded.into_value(),
-        Err(e) => {
-            notes.push(format!("focus origin: {e}"));
-            Default::default()
-        }
-    };
-    origin.mark(workspace_id, now_ms);
-    if let Err(e) = state.save_focus_origin(&origin) {
-        notes.push(format!("could not write focus origin: {e}"));
-    }
-}
-
 /// Brings the terminal to the front before Herdr moves focus, so the pane
 /// change happens in a window the user can see.
 ///
@@ -117,7 +97,7 @@ fn mark_focus_origin(state: &StateDir, workspace_id: &str, now_ms: u64, notes: &
 /// the user may already be in the right window.
 fn raise_terminal<R: Runner>(runner: &R, bundle_id: Option<&str>, notes: &mut Vec<String>) {
     let Some(bundle_id) = bundle_id else {
-        notes.push("no terminal known for this workspace, focusing without raising it".to_owned());
+        notes.push("no terminal known, focusing without raising it".to_owned());
         return;
     };
     match runner.run(Path::new(OPEN), &["-b", bundle_id]) {
@@ -149,16 +129,5 @@ fn clear<S: Spawner>(state: &StateDir, spawner: &S, job: &Job, notes: &mut Vec<S
         && let Err(e) = state.delete_job(&id)
     {
         notes.push(format!("could not delete job {}: {e}", job.id));
-    }
-
-    // Leaves the classification behind; only the notification is gone.
-    match state.pane_record(&job.pane_id) {
-        Ok(Loaded::Found(mut record)) if record.live_job.as_deref() == Some(job.id.as_str()) => {
-            record.live_job = None;
-            if let Err(e) = state.save_pane_record(&record) {
-                notes.push(format!("could not update pane {}: {e}", job.pane_id));
-            }
-        }
-        _ => {}
     }
 }

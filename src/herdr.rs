@@ -140,20 +140,6 @@ impl<R: Runner> Cli<'_, R> {
             .map(|r| r.pane)
     }
 
-    /// `None` for a pane with no agent identity at all, which Herdr reports
-    /// as an `agent_not_found` error.
-    pub fn agent_get(&self, pane_id: &str) -> Result<Option<PaneInfo>, Error> {
-        #[derive(Deserialize)]
-        struct Body {
-            agent: PaneInfo,
-        }
-        match self.query::<Body>(&["agent", "get", pane_id]) {
-            Ok(r) => Ok(Some(r.agent)),
-            Err(Error::Api { code, .. }) if code == "agent_not_found" => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
     /// The agent labels Herdr can detect by itself, e.g. `claude`, `codex`.
     pub fn agent_manifests(&self) -> Result<Vec<String>, Error> {
         #[derive(Deserialize)]

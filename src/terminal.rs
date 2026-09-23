@@ -1,25 +1,24 @@
-//! Which macOS app hosts a workspace, so a click can bring it forward with
-//! `open -b` before focusing the pane.
+//! Which macOS app to bring forward with `open -b` before a click focuses the
+//! pane, and whether that app is the one in front.
 //!
-//! Herdr never tells a plugin this, so it comes from the config or from
-//! watching which terminal is in front while the user is on a pane. Config
-//! always wins. Learning only fills gaps, because Herdr emits no focus event
-//! on manual navigation (`tests/manual_navigation_emits_no_focus_events.rs`),
-//! so there's no reliable moment to learn at.
+//! Herdr never tells a plugin which terminal it is running in. But the
+//! `herdr server` process carries the `__CFBundleIdentifier` of the terminal
+//! it was started from, and hooks are its children, so they have it too
+//! (seen on Herdr 0.9.0 under Ghostty). A server started in one terminal and
+//! attached from another names the first; `default_terminal` is for that.
 
 use std::path::Path;
 
 use crate::config::Config;
 use crate::process::Runner;
-use crate::state::{FocusOrigin, TerminalMemory};
 
 const LSAPPINFO: &str = "/usr/bin/lsappinfo";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalSource {
-    WorkspaceOverride,
     DefaultConfig,
-    Learned,
+    /// `__CFBundleIdentifier` from the hook's environment.
+    ServerEnv,
     Unresolved,
 }
 
@@ -31,15 +30,13 @@ pub struct Resolution {
     pub source: TerminalSource,
 }
 
-/// First match wins: `[workspaces]`, then `default_terminal`, then what we
-/// learned.
-pub fn resolve(config: &Config, memory: &TerminalMemory, workspace_id: &str) -> Resolution {
-    let (bundle_id, source) = if let Some(b) = config.workspaces.get(workspace_id) {
-        (Some(b.as_str()), TerminalSource::WorkspaceOverride)
-    } else if let Some(b) = &config.default_terminal {
+/// `default_terminal`, then the server's own terminal. One answer for every
+/// pane: there is one client, so there is one terminal.
+pub fn resolve(config: &Config, server_env: Option<&str>) -> Resolution {
+    let (bundle_id, source) = if let Some(b) = &config.default_terminal {
         (Some(b.as_str()), TerminalSource::DefaultConfig)
-    } else if let Some(b) = memory.get(workspace_id) {
-        (Some(b), TerminalSource::Learned)
+    } else if let Some(b) = server_env {
+        (Some(b), TerminalSource::ServerEnv)
     } else {
         (None, TerminalSource::Unresolved)
     };
@@ -47,59 +44,6 @@ pub fn resolve(config: &Config, memory: &TerminalMemory, workspace_id: &str) -> 
         bundle_id: bundle_id.map(str::to_owned),
         source,
     }
-}
-
-/// Why nothing was learned. Handy in logs and in `doctor`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Skip {
-    /// The config already names a terminal for this workspace.
-    Configured,
-    /// We focused a pane in this workspace from a click in the last 15 s,
-    /// so what's in front may be Notification Center, not the terminal.
-    RecentClick,
-    PaneNotFocused,
-    /// `herdr pane get` failed.
-    FocusUnknown,
-    FrontmostUnknown,
-    /// What's in front isn't in `terminal_allowlist`.
-    NotATerminal(String),
-    AlreadyKnown,
-}
-
-/// Decides whether to learn `workspace_id`'s terminal, and returns the
-/// bundle id to store if so.
-///
-/// The two lookups are closures because they cost a subprocess each, and
-/// most calls stop before needing them: whenever the config has a value,
-/// and the frontmost app isn't asked about unless the pane is focused.
-pub fn learn(
-    config: &Config,
-    memory: &TerminalMemory,
-    origin: &FocusOrigin,
-    workspace_id: &str,
-    now_ms: u64,
-    pane_focused: impl FnOnce() -> Option<bool>,
-    frontmost: impl FnOnce() -> Option<String>,
-) -> Result<String, Skip> {
-    if config.workspaces.contains_key(workspace_id) || config.default_terminal.is_some() {
-        return Err(Skip::Configured);
-    }
-    if origin.is_recent(workspace_id, now_ms) {
-        return Err(Skip::RecentClick);
-    }
-    match pane_focused() {
-        Some(true) => {}
-        Some(false) => return Err(Skip::PaneNotFocused),
-        None => return Err(Skip::FocusUnknown),
-    }
-    let bundle_id = frontmost().ok_or(Skip::FrontmostUnknown)?;
-    if !config.terminal_allowlist.contains(&bundle_id) {
-        return Err(Skip::NotATerminal(bundle_id));
-    }
-    if memory.get(workspace_id) == Some(bundle_id.as_str()) {
-        return Err(Skip::AlreadyKnown);
-    }
-    Ok(bundle_id)
 }
 
 /// The frontmost app's bundle id, from `lsappinfo`. It needs no permission,

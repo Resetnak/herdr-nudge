@@ -9,8 +9,7 @@
 //! Nothing is locked. The click process can run while an event hook does,
 //! so two writers to the same file means the last one wins.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -21,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::classify::{Classification, ClassifySignal, PaneKind};
+use crate::classify::PaneKind;
 use crate::cli::JobId;
 use crate::event::AgentStatus;
 
@@ -38,11 +37,6 @@ pub const VERSION: u32 = 1;
 /// leave a pane silent for the rest of the hour after a swipe. Seconds is
 /// all the churn needs.
 pub const REPEAT_AFTER_MS: u64 = 60_000;
-
-/// How long after our own click we refuse to learn a terminal. The click
-/// brings the terminal forward, but for a moment Notification Center or the
-/// previous app can still be frontmost.
-pub const FOCUS_ORIGIN_TTL_MS: u64 = 15_000;
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -180,95 +174,6 @@ pub trait Versioned {
     fn version(&self) -> u32;
 }
 
-/// `terminal-memory.json`: terminals we learned for workspaces that have
-/// nothing in the config.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TerminalMemory {
-    pub version: u32,
-    #[serde(default)]
-    pub workspaces: BTreeMap<String, LearnedTerminal>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LearnedTerminal {
-    pub bundle_id: String,
-    pub learned_at_ms: u64,
-}
-
-impl Default for TerminalMemory {
-    fn default() -> Self {
-        TerminalMemory {
-            version: VERSION,
-            workspaces: BTreeMap::new(),
-        }
-    }
-}
-
-impl Versioned for TerminalMemory {
-    fn version(&self) -> u32 {
-        self.version
-    }
-}
-
-impl TerminalMemory {
-    pub fn get(&self, workspace_id: &str) -> Option<&str> {
-        self.workspaces
-            .get(workspace_id)
-            .map(|l| l.bundle_id.as_str())
-    }
-
-    pub fn set(&mut self, workspace_id: &str, bundle_id: &str, now_ms: u64) {
-        self.workspaces.insert(
-            workspace_id.to_owned(),
-            LearnedTerminal {
-                bundle_id: bundle_id.to_owned(),
-                learned_at_ms: now_ms,
-            },
-        );
-    }
-}
-
-/// `focus-origin.json`: when we last focused a pane in each workspace
-/// ourselves, from a notification click.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FocusOrigin {
-    pub version: u32,
-    #[serde(default)]
-    pub workspaces: BTreeMap<String, u64>,
-}
-
-impl Default for FocusOrigin {
-    fn default() -> Self {
-        FocusOrigin {
-            version: VERSION,
-            workspaces: BTreeMap::new(),
-        }
-    }
-}
-
-impl Versioned for FocusOrigin {
-    fn version(&self) -> u32 {
-        self.version
-    }
-}
-
-impl FocusOrigin {
-    /// Also drops expired entries, so the file stays small.
-    pub fn mark(&mut self, workspace_id: &str, now_ms: u64) {
-        self.workspaces
-            .retain(|_, at| now_ms < at.saturating_add(FOCUS_ORIGIN_TTL_MS));
-        self.workspaces.insert(workspace_id.to_owned(), now_ms);
-    }
-
-    /// A mark from the future (the clock went back) still counts. Skipping
-    /// one learn is cheap; learning the wrong terminal isn't.
-    pub fn is_recent(&self, workspace_id: &str, now_ms: u64) -> bool {
-        self.workspaces
-            .get(workspace_id)
-            .is_some_and(|at| now_ms < at.saturating_add(FOCUS_ORIGIN_TTL_MS))
-    }
-}
-
 /// `agents-cache.json`: the agent labels Herdr detects by itself, from
 /// `server agent-manifests`.
 ///
@@ -309,61 +214,6 @@ impl AgentsCache {
 
     pub fn labels(&self) -> impl Iterator<Item = &str> {
         self.agents.iter().map(String::as_str)
-    }
-}
-
-/// `panes/<pane id in hex>.json`: what we last decided about a pane.
-///
-/// Not a cache to save work — classifying is free once `pane get` has been
-/// asked. It is what we fall back on when that query fails, so one
-/// unanswered question doesn't turn an agent pane into a shell one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PaneRecord {
-    pub version: u32,
-    pub pane_id: String,
-    /// The agent label this answer was about. `None` for a pane with no
-    /// agent identity at all.
-    pub agent: Option<String>,
-    pub kind: PaneKind,
-    pub signal: ClassifySignal,
-    pub classified_at_ms: u64,
-    /// The job for the notification currently showing for this pane, if
-    /// there is one. What stops the same status being notified twice, and
-    /// what a click clears.
-    #[serde(default)]
-    pub live_job: Option<String>,
-}
-
-impl Versioned for PaneRecord {
-    fn version(&self) -> u32 {
-        self.version
-    }
-}
-
-impl PaneRecord {
-    pub fn new(
-        pane_id: &str,
-        agent: Option<&str>,
-        classification: Classification,
-        now_ms: u64,
-    ) -> PaneRecord {
-        PaneRecord {
-            version: VERSION,
-            pane_id: pane_id.to_owned(),
-            agent: agent.map(str::to_owned),
-            kind: classification.kind,
-            signal: classification.signal,
-            classified_at_ms: now_ms,
-            live_job: None,
-        }
-    }
-
-    /// True when this record is about the same agent identity as `agent`.
-    ///
-    /// A pane that ran `claude` and now runs `make` is a different identity,
-    /// and the old answer says nothing about the new one.
-    pub fn is_about(&self, agent: Option<&str>) -> bool {
-        self.agent.as_deref() == agent
     }
 }
 
@@ -441,17 +291,6 @@ pub fn new_job_id(now_ms: u64, pid: u32) -> JobId {
         pid & 0xffff
     );
     JobId::parse(&id).expect("a job id built from a clock, a counter and a pid is 16 lowercase hex")
-}
-
-/// Pane ids go into file names as hex. They look like `w3:p1` today, but
-/// they come from the server, and a `/` or a `..` in one would otherwise
-/// write outside `panes/`.
-pub fn hex_name(pane_id: &str) -> String {
-    let mut out = String::with_capacity(pane_id.len() * 2);
-    for byte in pane_id.as_bytes() {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 /// The state directory and the files in it.
@@ -538,14 +377,6 @@ impl StateDir {
         Ok(ids)
     }
 
-    pub fn terminal_memory_path(&self) -> PathBuf {
-        self.root.join("terminal-memory.json")
-    }
-
-    pub fn focus_origin_path(&self) -> PathBuf {
-        self.root.join("focus-origin.json")
-    }
-
     pub fn shell_env_path(&self) -> PathBuf {
         self.root.join("shell.env")
     }
@@ -554,52 +385,11 @@ impl StateDir {
         self.root.join("agents-cache.json")
     }
 
-    pub fn panes_dir(&self) -> PathBuf {
-        self.root.join("panes")
-    }
-
-    pub fn pane_record_path(&self, pane_id: &str) -> PathBuf {
-        self.panes_dir().join(format!("{}.json", hex_name(pane_id)))
-    }
-
-    pub fn terminal_memory(&self) -> io::Result<Loaded<TerminalMemory>> {
-        read_json(&self.terminal_memory_path())
-    }
-
-    pub fn save_terminal_memory(&self, memory: &TerminalMemory) -> io::Result<()> {
-        write_json(&self.terminal_memory_path(), memory)
-    }
-
-    pub fn focus_origin(&self) -> io::Result<Loaded<FocusOrigin>> {
-        read_json(&self.focus_origin_path())
-    }
-
-    pub fn save_focus_origin(&self, origin: &FocusOrigin) -> io::Result<()> {
-        write_json(&self.focus_origin_path(), origin)
-    }
-
     pub fn agents_cache(&self) -> io::Result<Loaded<AgentsCache>> {
         read_json(&self.agents_cache_path())
     }
 
     pub fn save_agents_cache(&self, cache: &AgentsCache) -> io::Result<()> {
         write_json(&self.agents_cache_path(), cache)
-    }
-
-    pub fn pane_record(&self, pane_id: &str) -> io::Result<Loaded<PaneRecord>> {
-        read_json(&self.pane_record_path(pane_id))
-    }
-
-    pub fn save_pane_record(&self, record: &PaneRecord) -> io::Result<()> {
-        write_json(&self.pane_record_path(&record.pane_id), record)
-    }
-
-    /// For a pane that closed, or one whose agent identity changed.
-    pub fn forget_pane(&self, pane_id: &str) -> io::Result<()> {
-        match fs::remove_file(self.pane_record_path(pane_id)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
     }
 }
