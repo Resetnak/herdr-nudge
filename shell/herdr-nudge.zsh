@@ -1,0 +1,248 @@
+# herdr-nudge zsh hook: tells Herdr when a long command in this pane
+# finishes, so the herdr-nudge plugin can post a notification for it.
+#
+# The plugin copies this file into its state directory when Herdr starts,
+# next to the shell.env it reads. Source that copy from ~/.zshrc; it does
+# nothing outside a Herdr pane.
+#
+# A command claims the pane only once it has run for min_seconds: a
+# background watcher reports `working` then. When it finishes, precmd sends
+# the title and `idle`. Herdr turns that `idle` into `done` if nobody was
+# looking at the pane, and needs the `working` first to do it. Short
+# commands never call herdr at all. The claim is released by the next
+# command, unless that was typed ahead, or when the shell exits.
+
+[[ -n $ZSH_VERSION && $HERDR_ENV == 1 && -n $HERDR_PANE_ID ]] || return 0
+zmodload zsh/datetime zsh/zselect zsh/system 2>/dev/null || return 0
+
+# Declared without values so sourcing the file twice keeps a claim we hold.
+typeset -g  _herdr_nudge_bin=${HERDR_BIN_PATH:-herdr}
+typeset -gi _herdr_nudge_min
+typeset -gA _herdr_nudge_skip   # command names we never report
+typeset -g  _herdr_nudge_cmd    # label of the command running now, if timed
+typeset -g  _herdr_nudge_title
+typeset -gF _herdr_nudge_start
+typeset -gi _herdr_nudge_watcher
+typeset -g  _herdr_nudge_claim  # label Herdr holds for us, empty if none
+typeset -gi _herdr_nudge_last_seq
+typeset -gF _herdr_nudge_prompt_at  # when precmd last ran
+
+# shell.env is key=value lines written by the plugin. It is read line by
+# line and never sourced, so nothing in it can run as code.
+function _herdr_nudge_settings {
+  emulate -L zsh
+  local line key value enabled=0 min=
+  [[ -r $1 ]] || return 1
+  _herdr_nudge_skip=()
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line == *=* && $line != \#* ]] || continue
+    key=${line%%=*} value=${line#*=}
+    case $key in
+      enabled) enabled=$value ;;
+      min_seconds) min=$value ;;
+      ignore|agent) [[ -n $value ]] && _herdr_nudge_skip[$value]=1 ;;
+    esac
+  done < $1
+  [[ $enabled == 1 && $min == <-> ]] || return 1
+  _herdr_nudge_min=$min
+}
+
+# Missing shell.env means the plugin hasn't set this up since it was
+# installed, so the agent list is missing too. Doing nothing beats claiming
+# a pane that an agent CLI is about to report on itself. If an earlier
+# source added the hooks (shell commands since turned off, then `source
+# ~/.zshrc`), they come out too, or they'd go on with an empty skip list.
+if ! _herdr_nudge_settings ${${(%):-%x}:A:h}/shell.env; then
+  if (( $+functions[_herdr_nudge_zshexit] )); then
+    _herdr_nudge_zshexit
+    autoload -Uz add-zsh-hook
+    add-zsh-hook -d preexec _herdr_nudge_preexec
+    add-zsh-hook -d precmd _herdr_nudge_precmd
+    add-zsh-hook -d zshexit _herdr_nudge_zshexit
+  fi
+  return 0
+fi
+
+# Herdr drops a report whose --seq isn't above the last one it took from
+# this source for this pane, and it remembers that across shells and
+# releases. The clock in microseconds can't go below what an earlier shell
+# sent; the +1 covers two reports in the same microsecond.
+function _herdr_nudge_seq {
+  local -i now=$(( epochtime[1] * 1000000 + epochtime[2] / 1000 ))
+  (( _herdr_nudge_last_seq = now > _herdr_nudge_last_seq ? now : _herdr_nudge_last_seq + 1 ))
+  REPLY=$_herdr_nudge_last_seq
+}
+
+# Output and failures are dropped: the prompt must not care whether Herdr
+# answered. stdin is closed so a background call can't stop on a tty read.
+function _herdr_nudge_herdr {
+  "$_herdr_nudge_bin" "$@" </dev/null &>/dev/null
+}
+
+# Sets REPLY to the program a command line runs, skipping assignments and
+# wrappers like sudo. Quotes come off first, so `\vim` and `'vim'` are
+# still vim. Options after a wrapper are skipped but not their values, so
+# `sudo -u root make` gives `root`.
+function _herdr_nudge_program {
+  emulate -L zsh
+  local word
+  for word in ${(z)1}; do
+    word=${(Q)word}
+    # Before taking the basename, which would turn `CC=/usr/bin/clang`
+    # into `clang`.
+    case $word in
+      *=*|-*|'('|'{'|'!') continue ;;
+    esac
+    word=${word:t}
+    case $word in
+      sudo|env|command|builtin|noglob|nocorrect|time|nohup|nice) ;;
+      *) REPLY=$word; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# True if the line runs `exec` anywhere it could, e.g. `cd dir && exec
+# zsh`. The shell is replaced, so no precmd or zshexit would ever end a
+# claim. Only the start of each command counts, so `echo exec` is timed.
+function _herdr_nudge_execs {
+  emulate -L zsh
+  local word at_start=1
+  for word in ${(z)1}; do
+    (( at_start )) && [[ ${(Q)word} == exec ]] && return 0
+    case $word in
+      ';'|'&&'|'||'|'|'|'|&'|'&'|'&!'|'&|'|'('|'{'|'!'|do|then|else) at_start=1 ;;
+      *=*) ;;
+      *) at_start=0 ;;
+    esac
+  done
+  return 1
+}
+
+function _herdr_nudge_duration {
+  local -i s=$1
+  if (( s < 60 )); then
+    REPLY=${s}s
+  elif (( s < 3600 )); then
+    REPLY=$(( s / 60 ))m$(( s % 60 ))s
+  else
+    REPLY=$(( s / 3600 ))h${(l:2::0:)$(( s % 3600 / 60 ))}m
+  fi
+}
+
+function _herdr_nudge_stop_watcher {
+  (( _herdr_nudge_watcher )) || return 0
+  kill $_herdr_nudge_watcher 2>/dev/null
+  _herdr_nudge_watcher=0
+}
+
+function _herdr_nudge_release {
+  [[ -n $_herdr_nudge_claim ]] || return 0
+  _herdr_nudge_seq
+  _herdr_nudge_herdr pane release-agent $HERDR_PANE_ID --source herdr-nudge-zsh \
+    --agent $_herdr_nudge_claim --seq $REPLY &!
+  _herdr_nudge_claim=
+}
+
+# Runs in the background from preexec. It stays alive after reporting,
+# until precmd kills it, so the pid precmd kills can't have been reused by
+# some other process in the meantime. It leaves on its own if the shell
+# goes away without a precmd.
+function _herdr_nudge_watch {
+  emulate -L zsh
+  local -F deadline=$(( _herdr_nudge_start + _herdr_nudge_min ))
+  local -i hundredths
+  # zselect can return early on a signal, so sleep until the clock says so,
+  # a minute at most at a time.
+  while (( EPOCHREALTIME < deadline )); do
+    (( hundredths = (deadline - EPOCHREALTIME) * 100 + 1 ))
+    zselect -t $(( hundredths < 6000 ? hundredths : 6000 ))
+  done
+  # A shell killed outright runs no zshexit, and a claim made now would
+  # never be released.
+  (( sysparams[ppid] == $$ )) || return 0
+  # The title from the last command outlives a release, so replace it
+  # before the claim shows up in Herdr.
+  _herdr_nudge_seq
+  _herdr_nudge_herdr pane report-metadata $HERDR_PANE_ID --source herdr-nudge-zsh \
+    --title $_herdr_nudge_title --clear-state-labels --seq $REPLY
+  _herdr_nudge_seq
+  _herdr_nudge_herdr pane report-agent $HERDR_PANE_ID --source herdr-nudge-zsh \
+    --agent $_herdr_nudge_cmd --state working --seq $REPLY
+  while (( sysparams[ppid] == $$ )); do
+    zselect -t 6000
+  done
+}
+
+function _herdr_nudge_preexec {
+  emulate -L zsh -o extendedglob
+  # herdr-ohmyzsh reports this pane already, and two reporters would fight
+  # over it.
+  (( $+functions[_herdr_omz_preexec] )) && return 0
+  _herdr_nudge_stop_watcher
+  # A command typed ahead starts within milliseconds of the prompt. The one
+  # before it may have just finished while the user was away, and releasing
+  # now would take its banner down, or stop it posting. A person reading
+  # the output and typing takes longer than a second.
+  (( EPOCHREALTIME - _herdr_nudge_prompt_at >= 1 )) && _herdr_nudge_release
+  _herdr_nudge_cmd=
+  # $3 is the full text, with aliases expanded.
+  _herdr_nudge_execs $3 && return 0
+  # $1 is the line as typed, $2 with aliases expanded. Either name can be
+  # on the skip list.
+  _herdr_nudge_program $1 && (( ! $+_herdr_nudge_skip[$REPLY] )) || return 0
+  _herdr_nudge_program $2 && (( ! $+_herdr_nudge_skip[$REPLY] )) || return 0
+  _herdr_nudge_cmd=$REPLY
+
+  local text=${${1//[[:space:]]##/ }## }
+  text=${text%% }
+  (( ${#text} > 60 )) && text="${text[1,59]}…"
+  _herdr_nudge_title=$text
+
+  _herdr_nudge_start=$EPOCHREALTIME
+  _herdr_nudge_watch </dev/null &>/dev/null &!
+  _herdr_nudge_watcher=$!
+}
+
+function _herdr_nudge_precmd {
+  local -i rc=$?
+  emulate -L zsh
+  _herdr_nudge_prompt_at=$EPOCHREALTIME
+  [[ -n $_herdr_nudge_cmd ]] || return 0
+  local cmd=$_herdr_nudge_cmd
+  _herdr_nudge_cmd=
+  # Kill first, then read the clock. If the watcher reported before it
+  # died, the clock is past the threshold, so we report idle too and the
+  # pane isn't left stuck on working.
+  _herdr_nudge_stop_watcher
+  local -F elapsed=$(( EPOCHREALTIME - _herdr_nudge_start ))
+  (( elapsed >= _herdr_nudge_min )) || return 0
+
+  local word=done
+  (( rc )) && word=failed
+  _herdr_nudge_duration $elapsed
+  local title="$_herdr_nudge_title · exit $rc · $REPLY"
+  _herdr_nudge_seq
+  local meta_seq=$REPLY
+  _herdr_nudge_seq
+  local idle_seq=$REPLY
+  # One background job, so the title lands before the idle it goes with.
+  {
+    _herdr_nudge_herdr pane report-metadata $HERDR_PANE_ID --source herdr-nudge-zsh \
+      --title $title --state-label idle=$word --seq $meta_seq
+    _herdr_nudge_herdr pane report-agent $HERDR_PANE_ID --source herdr-nudge-zsh \
+      --agent $cmd --state idle --seq $idle_seq
+  } </dev/null &>/dev/null &!
+  _herdr_nudge_claim=$cmd
+}
+
+function _herdr_nudge_zshexit {
+  emulate -L zsh
+  _herdr_nudge_stop_watcher
+  _herdr_nudge_release
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook preexec _herdr_nudge_preexec
+add-zsh-hook precmd _herdr_nudge_precmd
+add-zsh-hook zshexit _herdr_nudge_zshexit

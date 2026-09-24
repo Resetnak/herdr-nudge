@@ -9,7 +9,7 @@
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -152,6 +152,24 @@ impl<R: Runner> Cli<'_, R> {
         }
         self.query::<Body>(&["server", "agent-manifests", "--json"])
             .map(|r| r.manifests.into_iter().map(|m| m.agent).collect())
+    }
+
+    /// Where Herdr keeps a plugin's config. A plain path on stdout, not JSON,
+    /// and worked out without the server (0.9.0 and 0.9.1 both answer with
+    /// none running).
+    pub fn plugin_config_dir(&self, plugin_id: &str) -> Result<PathBuf, Error> {
+        let out = self
+            .runner
+            .run(self.bin, &["plugin", "config-dir", plugin_id])?;
+        let path = out.stdout.trim();
+        if !out.success() || path.is_empty() {
+            return Err(Error::Unexpected(format!(
+                "exit {:?}: {}",
+                out.code,
+                out.stderr.trim()
+            )));
+        }
+        Ok(PathBuf::from(path))
     }
 }
 

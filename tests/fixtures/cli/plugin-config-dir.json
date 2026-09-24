@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "plugin",
+    "config-dir",
+    "herdr-nudge"
+  ],
+  "captured_at": "2026-09-23T20:41:15",
+  "herdr_version": "herdr 0.9.1",
+  "exit_code": 0,
+  "stdout": "/Users/dev/.config/herdr/plugins/config/herdr-nudge\n",
+  "stderr": ""
+}

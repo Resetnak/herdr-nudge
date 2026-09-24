@@ -80,6 +80,17 @@ fn a_failed_run_is_an_io_error() {
 }
 
 #[test]
+fn plugin_config_dir_is_the_path_herdr_prints() {
+    let replay = Replay::new([Recorded::cli("plugin-config-dir")]);
+    let dir = cli(&replay).plugin_config_dir("herdr-nudge").unwrap();
+    assert_eq!(
+        dir,
+        Path::new("/Users/dev/.config/herdr/plugins/config/herdr-nudge"),
+        "plugin-config-dir: stdout without its newline"
+    );
+}
+
+#[test]
 fn agent_manifests_lists_every_agent_label() {
     let replay = Replay::new([Recorded::cli("agent-manifests")]);
     let labels = cli(&replay).agent_manifests().unwrap();

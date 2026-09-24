@@ -150,6 +150,7 @@ belong to the probe; tests should override them.
 | `cli/pane-get-reported-no-session` | p | a pane claimed by `pane report-agent`: `agent`, `title` and `state_labels`, no `agent_session` |
 | `cli/pane-get-after-release` | p | the same pane after `release-agent`: no `agent`, `unknown` status, `title` and `state_labels` left behind |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
+| `cli/plugin-config-dir` | – | where Herdr keeps this plugin's config: a bare path, not JSON |
 | `socket/pane-focus-ok` | p | the focus call a click makes; reply is `{"id","result"}` |
 | `socket/pane-focus-not-found` | p | `pane_not_found`, the error reply shape |
 | `sys/lsappinfo-front` | – | the frontmost app's ASN |

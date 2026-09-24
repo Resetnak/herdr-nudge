@@ -30,7 +30,7 @@ fn defaults() {
     assert!(c.agents.enabled && c.shell.enabled);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked, AgentStatus::Done]);
     assert_eq!(c.shell.statuses, [AgentStatus::Idle, AgentStatus::Done]);
-    assert_eq!(c.shell.min_seconds, 30);
+    assert_eq!(c.shell.min_seconds, 5);
     assert!(!c.shell.notify_on_failure_only);
 }
 
@@ -51,7 +51,7 @@ statuses = ["blocked"]
 
 [shell]
 enabled = false
-min_seconds = 5
+min_seconds = 12
 statuses = ["done"]
 notify_on_failure_only = true
 ignore_commands = ["vim"]
@@ -66,6 +66,7 @@ known_agents_remove = ["pi"]
     assert!(!c.notifications.sound);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked]);
     assert!(!c.shell.enabled);
+    assert_eq!(c.shell.min_seconds, 12);
     assert_eq!(c.shell.statuses, [AgentStatus::Done]);
     assert_eq!(c.shell.known_agents_extra, ["aider"]);
 }
@@ -159,6 +160,14 @@ fn shell_env_lists_settings_ignores_and_agents() {
         ]
     );
     assert!(skipped.is_empty());
+}
+
+#[test]
+fn shell_env_caps_min_seconds_at_a_year() {
+    // zsh integers are signed; u64::MAX would wrap negative in the hook.
+    let config = Config::parse("[shell]\nmin_seconds = 18446744073709551615\n").unwrap();
+    let (text, _) = shell_env(&config, &BTreeSet::new());
+    assert!(text.contains("\nmin_seconds=31536000\n"), "{text}");
 }
 
 #[test]

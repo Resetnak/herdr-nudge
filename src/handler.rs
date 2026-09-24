@@ -184,13 +184,16 @@ pub fn handle<R: Runner, S: Spawner>(
 ///
 /// `herdr_bin` is `None` when the hook's environment didn't say where
 /// `herdr` is. The list is then left as it was.
+///
+/// Returns the notes and the agent list if one was fetched, which the zsh
+/// hook's install needs even when saving it failed.
 pub fn cleanup<R: Runner, S: Spawner>(
     state: &StateDir,
     herdr_bin: Option<&Path>,
     runner: &R,
     spawner: &S,
     now_ms: u64,
-) -> Vec<String> {
+) -> (Vec<String>, Option<AgentsCache>) {
     let mut notes = Vec::new();
 
     let mut jobs = Vec::new();
@@ -216,13 +219,14 @@ pub fn cleanup<R: Runner, S: Spawner>(
         withdraw(state, spawner, jobs.iter(), &mut notes);
     }
 
-    match herdr_bin {
-        Some(bin) => {
-            fetch_agents(&Cli { bin, runner }, state, now_ms, &mut notes);
+    let agents = match herdr_bin {
+        Some(bin) => fetch_agents(&Cli { bin, runner }, state, now_ms, &mut notes),
+        None => {
+            notes.push("no HERDR_BIN_PATH, agent list not refreshed".to_owned());
+            None
         }
-        None => notes.push("no HERDR_BIN_PATH, agent list not refreshed".to_owned()),
-    }
-    notes
+    };
+    (notes, agents)
 }
 
 /// Takes the pane's notification down if the user went to the pane.

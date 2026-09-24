@@ -370,6 +370,11 @@ impl StateDir {
         self.root.join("shell.env")
     }
 
+    /// The path users put in `~/.zshrc`, so it must never move.
+    pub fn shell_hook_path(&self) -> PathBuf {
+        self.root.join("herdr-nudge.zsh")
+    }
+
     pub fn agents_cache_path(&self) -> PathBuf {
         self.root.join("agents-cache.json")
     }

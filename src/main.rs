@@ -7,7 +7,7 @@ use herdr_nudge::cli::{self, Mode, ParseError};
 use herdr_nudge::context::{self, Context, Env};
 use herdr_nudge::process::System;
 use herdr_nudge::state::StateDir;
-use herdr_nudge::{click, event, event_summary, handler, notifier};
+use herdr_nudge::{click, event, event_summary, handler, notifier, shell_hook};
 
 fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
@@ -130,8 +130,9 @@ fn run_event() -> ExitCode {
 /// Herdr's startup hook. Exits 0 whatever happens, like an event.
 ///
 /// The startup hook gets `HERDR_PLUGIN_STATE_DIR` and `HERDR_BIN_PATH`
-/// (seen on 0.9.1). Neither is required: the state directory has a fallback,
-/// and without `herdr` the jobs still go.
+/// (seen on 0.9.1). None of the variables is required: the state directory
+/// has a fallback, `herdr` can say where the config is, and without `herdr`
+/// the jobs still go.
 fn run_cleanup() -> ExitCode {
     let Some(state) = StateDir::locate(|name| std::env::var(name).ok()) else {
         eprintln!("herdr-nudge: no HOME, cannot find the state directory");
@@ -140,14 +141,26 @@ fn run_cleanup() -> ExitCode {
     let herdr_bin = std::env::var_os("HERDR_BIN_PATH")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from);
+    let config_dir = std::env::var_os("HERDR_PLUGIN_CONFIG_DIR")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
     let system = System::default();
-    let notes = handler::cleanup(
+    let (mut notes, fetched) = handler::cleanup(
         &state,
         herdr_bin.as_deref(),
         &system,
         &system,
         herdr_nudge::state::now_ms(),
     );
+    // After the cleanup, which has just refreshed the agent list the hook
+    // needs.
+    notes.extend(shell_hook::install(
+        &state,
+        config_dir.as_deref(),
+        herdr_bin.as_deref(),
+        fetched,
+        &system,
+    ));
     for note in notes {
         eprintln!("herdr-nudge: {note}");
     }

@@ -1106,7 +1106,7 @@ fn cleanup_drops_every_job_and_refreshes_the_agent_list() {
     harness.spy.spawns.borrow_mut().clear();
     harness.runner = Replay::new([Recorded::cli("agent-manifests-0.9.1")]);
 
-    let notes = handler::cleanup(
+    let (notes, fetched) = handler::cleanup(
         &harness.state,
         Some(&harness.herdr_bin),
         &harness.runner,
@@ -1133,12 +1133,17 @@ fn cleanup_drops_every_job_and_refreshes_the_agent_list() {
         panic!("no agent list after cleanup: {notes:?}");
     };
     assert!(cache.agents.contains("letta"), "0.9.1's list: {cache:?}");
+    assert_eq!(
+        fetched.map(|f| f.agents),
+        Some(cache.agents),
+        "returned list"
+    );
 }
 
 #[test]
 fn cleanup_without_herdr_still_drops_jobs() {
     let harness = blocked_on("cleanup_no_herdr", "w1:p1");
-    let notes = handler::cleanup(
+    let (notes, fetched) = handler::cleanup(
         &harness.state,
         None,
         &harness.runner,
@@ -1147,6 +1152,7 @@ fn cleanup_without_herdr_still_drops_jobs() {
     );
     assert_eq!(harness.state.job_ids().unwrap(), Vec::new(), "{notes:?}");
     assert_eq!(removes(&harness.spy), vec!["herdr-nudge-w1:p1"]);
+    assert!(fetched.is_none(), "no herdr, so nothing fetched");
 }
 
 /// A restored pane's first status event can post while the startup hook is
@@ -1157,7 +1163,7 @@ fn cleanup_keeps_a_job_posted_after_it_started() {
     // blocked_on posted the job, then moved the clock on by a second. So a
     // cleanup that started at that second saw the job posted during it.
     let started = harness.now_ms - 1_000;
-    let notes = handler::cleanup(&harness.state, None, &harness.runner, &harness.spy, started);
+    let (notes, _) = handler::cleanup(&harness.state, None, &harness.runner, &harness.spy, started);
     assert_eq!(harness.state.job_ids().unwrap().len(), 1, "{notes:?}");
     assert_eq!(removes(&harness.spy), Vec::<String>::new(), "{notes:?}");
 }

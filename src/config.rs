@@ -87,7 +87,7 @@ impl Default for Shell {
     fn default() -> Self {
         Shell {
             enabled: true,
-            min_seconds: 30,
+            min_seconds: 5,
             statuses: vec![AgentStatus::Idle, AgentStatus::Done],
             notify_on_failure_only: false,
             ignore_commands: ["vim", "nvim", "less", "man", "ssh", "top", "htop"]
@@ -193,7 +193,13 @@ pub fn shell_env(config: &Config, catalogue: &BTreeSet<String>) -> (String, Vec<
     let mut out =
         String::from("# Written by herdr-nudge from config.toml. Edits are overwritten.\n");
     out.push_str(&format!("enabled={}\n", u8::from(config.shell.enabled)));
-    out.push_str(&format!("min_seconds={}\n", config.shell.min_seconds));
+    // zsh integers are signed, so a u64 past i64::MAX would wrap negative
+    // there and time every command. A year is longer than anything runs.
+    const MAX_MIN_SECONDS: u64 = 365 * 24 * 3600;
+    out.push_str(&format!(
+        "min_seconds={}\n",
+        config.shell.min_seconds.min(MAX_MIN_SECONDS)
+    ));
 
     let mut skipped = Vec::new();
     let mut list = |key: &str, values: &mut dyn Iterator<Item = &String>| {

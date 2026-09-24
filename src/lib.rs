@@ -7,7 +7,8 @@
 //! shell command, and [`terminal`] which app to bring forward on a click.
 //! [`content`] writes the three lines of a banner and [`notifier`] posts it.
 //! [`handler`] is what happens on an event, and [`click`] what happens when
-//! the notification is clicked.
+//! the notification is clicked. [`shell_hook`] installs the zsh hook that
+//! reports long shell commands.
 
 pub mod classify;
 pub mod cli;
@@ -20,6 +21,7 @@ pub mod handler;
 pub mod herdr;
 pub mod notifier;
 pub mod process;
+pub mod shell_hook;
 pub mod state;
 pub mod terminal;
 
