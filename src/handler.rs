@@ -94,7 +94,8 @@ pub struct Posted {
     pub job_id: JobId,
     pub group: String,
     pub kind: PaneKind,
-    pub signal: ClassifySignal,
+    /// `None` for `herdr-nudge test`, which says what kind it is.
+    pub signal: Option<ClassifySignal>,
     pub title: String,
 }
 
@@ -229,6 +230,104 @@ pub fn cleanup<R: Runner, S: Spawner>(
         }
     };
     (notes, agents)
+}
+
+/// `herdr-nudge test`: a banner for the pane it runs in, posted the way an
+/// event's is, with a job file, so clicking it runs the real click.
+///
+/// The config's triggers and ignore lists aren't checked, and it isn't
+/// suppressed as `Watching`: the user is at this pane when they run it, and
+/// the point is to see a banner. What it says is made up, but laid out the
+/// way a real agent or shell banner is.
+///
+/// It races hooks like any post does (see the module comment). With the zsh
+/// hook holding a claim on the pane, typing the command releases it, and the
+/// hook for that status change can take the new banner down if it runs late.
+pub fn test<R: Runner, S: Spawner>(deps: &Deps<R, S>, pane_id: &str, kind: PaneKind) -> Report {
+    let mut notes = Vec::new();
+    let jobs = live_jobs(deps.state, deps.spawner, deps.now_ms, &mut notes);
+
+    if !deps.notifier_bin.is_file() {
+        let outcome = Outcome::NotifierMissing(deps.notifier_bin.to_owned());
+        return Report { outcome, notes };
+    }
+
+    let cli = Cli {
+        bin: deps.herdr_bin,
+        runner: deps.runner,
+    };
+    // Also checks the pane is one this server has, since the id came from
+    // the environment.
+    let workspace_id = match cli.pane_get(pane_id) {
+        Ok(info) => info.workspace_id,
+        Err(e) => {
+            let outcome = Outcome::Failed(format!("pane get {pane_id}: {e}"));
+            return Report { outcome, notes };
+        }
+    };
+    let label = match cli.workspace_label(&workspace_id) {
+        Ok(label) => label,
+        Err(e) => {
+            notes.push(format!("workspace get {workspace_id}: {e}"));
+            None
+        }
+    };
+
+    let event = test_event(pane_id, &workspace_id, kind);
+    let resolution = terminal::resolve(deps.config, deps.runner, deps.socket_path, &mut notes);
+    let content = content::compose(kind, &event, label.as_deref(), None);
+    let outcome = match post(
+        deps,
+        &event,
+        kind,
+        event.agent.as_deref(),
+        &content,
+        &resolution,
+        &mut notes,
+    ) {
+        Ok((job_id, group)) => {
+            // Replaced on screen by this one, same group.
+            forget(deps.state, for_pane(&jobs, pane_id).into_iter(), &mut notes);
+            Outcome::Posted(Posted {
+                job_id,
+                group,
+                kind,
+                signal: None,
+                title: content.title,
+            })
+        }
+        Err(outcome) => outcome,
+    };
+    Report { outcome, notes }
+}
+
+/// What a `blocked` agent or a finished shell command would send, give or
+/// take the names.
+fn test_event(pane_id: &str, workspace_id: &str, kind: PaneKind) -> StatusEvent {
+    let (agent_status, display_agent, title, state_labels) = match kind {
+        PaneKind::Agent => (
+            AgentStatus::Blocked,
+            Some("Herdr Nudge".to_owned()),
+            "herdr-nudge test".to_owned(),
+            Default::default(),
+        ),
+        // The zsh hook's own wording.
+        PaneKind::Shell => (
+            AgentStatus::Done,
+            None,
+            "herdr-nudge test --shell · exit 0 · 0s".to_owned(),
+            [("idle".to_owned(), "done".to_owned())].into(),
+        ),
+    };
+    StatusEvent {
+        pane_id: pane_id.to_owned(),
+        workspace_id: workspace_id.to_owned(),
+        agent_status,
+        agent: Some(state::PLUGIN_ID.to_owned()),
+        display_agent,
+        title: Some(title),
+        state_labels,
+    }
 }
 
 /// Takes the pane's notification down if the user went to the pane.
@@ -376,13 +475,6 @@ fn notify<R: Runner, S: Spawner>(
         return Outcome::Watching;
     }
 
-    let job_id = state::new_job_id(deps.now_ms, deps.pid);
-    let execute = match notifier::click_command(deps.self_bin, &job_id) {
-        Ok(execute) => execute,
-        Err(e) => return Outcome::CannotBuildClick(e.to_string()),
-    };
-
-    let group = notifier::group_for(&event.pane_id);
     let content = content::compose(
         classification.kind,
         event,
@@ -390,14 +482,49 @@ fn notify<R: Runner, S: Spawner>(
         info.as_ref()
             .and_then(|i| i.terminal_title_stripped.as_deref()),
     );
+    match post(
+        deps,
+        event,
+        classification.kind,
+        agent_label,
+        &content,
+        &resolution,
+        notes,
+    ) {
+        Ok((job_id, group)) => Outcome::Posted(Posted {
+            job_id,
+            group,
+            kind: classification.kind,
+            signal: Some(classification.signal),
+            title: content.title,
+        }),
+        Err(outcome) => outcome,
+    }
+}
 
+/// Writes the job and puts the banner up. Returns the job id and group, or
+/// why nothing was posted.
+fn post<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    event: &StatusEvent,
+    kind: PaneKind,
+    agent_label: Option<&str>,
+    content: &content::Content,
+    resolution: &terminal::Resolution,
+    notes: &mut Vec<String>,
+) -> Result<(JobId, String), Outcome> {
+    let job_id = state::new_job_id(deps.now_ms, deps.pid);
+    let execute = notifier::click_command(deps.self_bin, &job_id)
+        .map_err(|e| Outcome::CannotBuildClick(e.to_string()))?;
+
+    let group = notifier::group_for(&event.pane_id);
     let job = Job {
         version: VERSION,
         id: job_id.to_string(),
         pane_id: event.pane_id.clone(),
         workspace_id: event.workspace_id.clone(),
         agent_label: agent_label.map(str::to_owned),
-        kind: classification.kind,
+        kind,
         status: event.agent_status,
         group: group.clone(),
         bundle_id: resolution.bundle_id.clone(),
@@ -418,10 +545,10 @@ fn notify<R: Runner, S: Spawner>(
     // Written before anything is on screen, because a banner can be clicked
     // the moment it appears and a click with no job file does nothing.
     if let Err(e) = deps.state.save_job(&job) {
-        return Outcome::Failed(format!("could not write job: {e}"));
+        return Err(Outcome::Failed(format!("could not write job: {e}")));
     }
 
-    let image = logo_for(deps, classification.kind, agent_label);
+    let image = logo_for(deps, kind, agent_label);
     let notifier = Notifier {
         binary: deps.notifier_bin,
         spawner: deps.spawner,
@@ -440,16 +567,11 @@ fn notify<R: Runner, S: Spawner>(
         // suppress the next event as a duplicate of a banner that never
         // existed.
         delete_job(deps.state, &job_id, notes);
-        return Outcome::Failed(format!("could not start the notifier: {e}"));
+        return Err(Outcome::Failed(format!(
+            "could not start the notifier: {e}"
+        )));
     }
-
-    Outcome::Posted(Posted {
-        job_id,
-        group,
-        kind: classification.kind,
-        signal: classification.signal,
-        title: content.title,
-    })
+    Ok((job_id, group))
 }
 
 /// Either side of the config could want this status. Both are checked with

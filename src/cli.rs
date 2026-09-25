@@ -14,6 +14,8 @@ pub enum Mode {
     /// Herdr's startup hook.
     Cleanup,
     Doctor,
+    /// Writes a commented `config.toml`, or prints it if there is one.
+    ExampleConfig,
     Test {
         shell: bool,
     },
@@ -83,7 +85,9 @@ herdr-nudge — macOS notifications for Herdr panes
   herdr-nudge --click <16 hex>      focus the pane a notification was for
   herdr-nudge --cleanup             startup hook
   herdr-nudge doctor                diagnose config and bundle
-  herdr-nudge test [--shell]        post a real notification
+  herdr-nudge test [--shell]        post a notification for this pane
+  herdr-nudge example-config        write config.toml with every setting,
+                                    or print it if the file exists
 ";
 
 /// `args` is argv without the program name.
@@ -113,6 +117,10 @@ where
         "doctor" => {
             no_more(rest, "doctor")?;
             Ok(Mode::Doctor)
+        }
+        "example-config" => {
+            no_more(rest, "example-config")?;
+            Ok(Mode::ExampleConfig)
         }
         "test" => {
             let mut shell = false;

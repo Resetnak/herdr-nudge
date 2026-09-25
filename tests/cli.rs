@@ -64,6 +64,7 @@ fn click_needs_its_value_and_nothing_more() {
 fn the_remaining_modes_parse() {
     assert_eq!(parse(["--cleanup"]), Ok(Mode::Cleanup));
     assert_eq!(parse(["doctor"]), Ok(Mode::Doctor));
+    assert_eq!(parse(["example-config"]), Ok(Mode::ExampleConfig));
     assert_eq!(parse(["test"]), Ok(Mode::Test { shell: false }));
     assert_eq!(parse(["test", "--shell"]), Ok(Mode::Test { shell: true }));
     assert_eq!(parse(["--help"]), Ok(Mode::Help));

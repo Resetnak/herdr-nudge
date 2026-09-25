@@ -3,9 +3,10 @@
 mod support;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
-use herdr_nudge::context::{Context, Env};
+use herdr_nudge::context::{Context, Env, plugin_root_above};
 use support::Fixture;
 
 #[test]
@@ -158,4 +159,26 @@ fn a_context_with_only_a_workspace_is_enough() {
     // count on.
     let context = Context::parse(r#"{"workspace_id":"w9"}"#).expect("minimal context");
     assert_eq!(context.workspace_display(), "w9");
+}
+
+/// The binary sits in `target/release/` while developing and in `bin/` once
+/// installed; either way the manifest is further up.
+#[test]
+fn the_plugin_root_is_the_nearest_directory_with_a_manifest() {
+    let root = support::scratch_dir("plugin_root_above");
+    fs::write(root.join("herdr-plugin.toml"), "").unwrap();
+    let dev = root.join("target/release");
+    fs::create_dir_all(&dev).unwrap();
+    // A manifest named like the binary doesn't count: only a directory's.
+    fs::create_dir_all(dev.join("herdr-plugin.toml")).unwrap();
+
+    for binary in [dev.join("herdr-nudge"), root.join("bin/herdr-nudge")] {
+        assert_eq!(
+            plugin_root_above(&binary).as_deref(),
+            Some(root.as_path()),
+            "{}",
+            binary.display()
+        );
+    }
+    assert_eq!(plugin_root_above(Path::new("/usr/bin/herdr-nudge")), None);
 }

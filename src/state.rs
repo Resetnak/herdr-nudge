@@ -293,8 +293,10 @@ pub struct StateDir {
 /// A click has no `HERDR_*` environment and its argument is only a job id, so
 /// it has to find the state directory itself. Herdr 0.9.0 uses
 /// `~/.local/state/herdr/plugins/<plugin id>` (see the captured environment
-/// in any `tests/fixtures/events/` file). `XDG_STATE_HOME` is tried first as
-/// the usual convention, though no Herdr version has been seen honouring it.
+/// in any `tests/fixtures/events/` file). `XDG_STATE_HOME` is tried first,
+/// because Herdr 0.9.1 honours it: `herdr plugin config-dir` run with it set
+/// creates `$XDG_STATE_HOME/herdr/plugins/<plugin id>`. A click, run with a
+/// bare environment, won't have it even when the server does.
 pub const PLUGIN_ID: &str = "herdr-nudge";
 
 impl StateDir {

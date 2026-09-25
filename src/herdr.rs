@@ -105,6 +105,13 @@ fn parse_reply<T: DeserializeOwned>(text: &str) -> Result<T, Error> {
     }
 }
 
+/// Agents Herdr has an integration for (`herdr integration status`) but no
+/// detection manifest, so `server agent-manifests` leaves them out. Both
+/// 0.9.0 and 0.9.1 ship these integrations, and each reports under this
+/// label with a session. Treated as if the manifests named them, so the zsh
+/// hook leaves their panes alone even when a pane query fails.
+pub const AGENTS_WITHOUT_MANIFEST: &[&str] = &["omp", "mastracode"];
+
 pub struct Cli<'a, R: Runner> {
     pub bin: &'a Path,
     pub runner: &'a R,
@@ -152,6 +159,24 @@ impl<R: Runner> Cli<'_, R> {
         }
         self.query::<Body>(&["server", "agent-manifests", "--json"])
             .map(|r| r.manifests.into_iter().map(|m| m.agent).collect())
+    }
+
+    /// The name the user gave a workspace, which is what a banner shows.
+    /// An event's context carries it, but a pane's environment has only the
+    /// id. `None` for an empty label, which `workspace create --label ""`
+    /// makes (`tests/fixtures/cli/workspace-get-empty-label.json`).
+    pub fn workspace_label(&self, workspace_id: &str) -> Result<Option<String>, Error> {
+        #[derive(Deserialize)]
+        struct Body {
+            workspace: Workspace,
+        }
+        #[derive(Deserialize)]
+        struct Workspace {
+            #[serde(default)]
+            label: Option<String>,
+        }
+        self.query::<Body>(&["workspace", "get", workspace_id])
+            .map(|r| r.workspace.label.filter(|label| !label.is_empty()))
     }
 
     /// Where Herdr keeps a plugin's config. A plain path on stdout, not JSON,

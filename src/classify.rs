@@ -29,6 +29,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
+use crate::herdr::AGENTS_WITHOUT_MANIFEST;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,7 +45,8 @@ pub enum ClassifySignal {
     /// `known_agents_extra` or `known_agents_remove` named the label, and
     /// Herdr's own list would have said otherwise.
     ConfigOverride,
-    /// The label is one of Herdr's agent manifests.
+    /// The label is one of Herdr's agent manifests, or one of
+    /// `herdr::AGENTS_WITHOUT_MANIFEST`.
     Catalogue,
     /// The pane has an agent session.
     AgentSession,
@@ -88,7 +90,7 @@ pub fn classify(
         if names(&config.shell.known_agents_remove, label) {
             return decided(PaneKind::Shell, ClassifySignal::ConfigOverride);
         }
-        if manifests.contains(label) {
+        if manifests.contains(label) || AGENTS_WITHOUT_MANIFEST.contains(&label) {
             return decided(PaneKind::Agent, ClassifySignal::Catalogue);
         }
         if names(&config.shell.known_agents_extra, label) {

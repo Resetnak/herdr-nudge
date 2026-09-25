@@ -1,9 +1,11 @@
 //! Dispatch, and the only place that reads the real environment.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use herdr_nudge::classify::PaneKind;
 use herdr_nudge::cli::{self, Mode, ParseError};
+use herdr_nudge::config::{self, Config};
 use herdr_nudge::context::{self, Context, Env};
 use herdr_nudge::process::System;
 use herdr_nudge::state::StateDir;
@@ -14,6 +16,8 @@ fn main() -> ExitCode {
         Ok(Mode::Event) => run_event(),
         Ok(Mode::Click(id)) => run_click(&id),
         Ok(Mode::Cleanup) => run_cleanup(),
+        Ok(Mode::ExampleConfig) => run_example_config(),
+        Ok(Mode::Test { shell }) => run_test(shell),
         Ok(Mode::Help) => {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
@@ -82,17 +86,7 @@ fn run_event() -> ExitCode {
 
     eprintln!("herdr-nudge: {}", event_summary(&envelope, ctx.as_ref()));
 
-    // A config we can't parse falls back to defaults rather than going quiet.
-    // One typo must not be able to stop notifications, and defaults announce
-    // themselves. The cost is that the whole file reverts, so `enabled =
-    // false` goes back to true until it's fixed; `doctor` reports it.
-    let config = match herdr_nudge::config::Config::load(&env.config_dir) {
-        Ok(config) => config,
-        Err(err) => {
-            eprintln!("herdr-nudge: {err} — using defaults");
-            Default::default()
-        }
-    };
+    let config = load_config(&env.config_dir);
 
     let self_bin = match own_path() {
         Some(path) => path,
@@ -138,12 +132,8 @@ fn run_cleanup() -> ExitCode {
         eprintln!("herdr-nudge: no HOME, cannot find the state directory");
         return ExitCode::SUCCESS;
     };
-    let herdr_bin = std::env::var_os("HERDR_BIN_PATH")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from);
-    let config_dir = std::env::var_os("HERDR_PLUGIN_CONFIG_DIR")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from);
+    let herdr_bin = env_path("HERDR_BIN_PATH");
+    let config_dir = env_path("HERDR_PLUGIN_CONFIG_DIR");
     let system = System::default();
     let (mut notes, fetched) = handler::cleanup(
         &state,
@@ -185,6 +175,149 @@ fn run_click(id: &cli::JobId) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The config file with every setting in it, for the user to edit. Never
+/// replaces one that exists: then it goes to stdout instead.
+fn run_example_config() -> ExitCode {
+    let system = System::default();
+    let dir = match config::locate_dir(env_path("HERDR_PLUGIN_CONFIG_DIR"), &herdr_bin(), &system) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("herdr-nudge: could not find the config directory ({e}), printing instead");
+            print!("{}", config::example());
+            return ExitCode::SUCCESS;
+        }
+    };
+    let path = Config::path(&dir);
+    match config::write_example(&dir) {
+        Ok(true) => {
+            println!("wrote {}", path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            eprintln!(
+                "herdr-nudge: {} exists, left alone; here is the example",
+                path.display()
+            );
+            print!("{}", config::example());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("herdr-nudge: could not write {}: {e}", path.display());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Run from a pane's shell, which has the pane id and the socket but none
+/// of the paths a hook gets.
+fn run_test(shell: bool) -> ExitCode {
+    let (Some(pane_id), Some(socket_path)) =
+        (env_string("HERDR_PANE_ID"), env_path("HERDR_SOCKET_PATH"))
+    else {
+        eprintln!(
+            "herdr-nudge: test has to run inside a Herdr pane (no HERDR_PANE_ID or HERDR_SOCKET_PATH)"
+        );
+        return ExitCode::FAILURE;
+    };
+    // The shell's own environment, `XDG_STATE_HOME` included: Herdr puts
+    // plugin state under it when it's set (`herdr plugin config-dir` creates
+    // the directory there), and the server usually has the same one as the
+    // shell it was started from. So this finds the jobs the hooks write. A
+    // click, with a bare environment, can miss them; then this banner's
+    // click fails the same way a real one would, rather than hiding it.
+    let Some(state) = StateDir::locate(|name| std::env::var(name).ok()) else {
+        eprintln!("herdr-nudge: no HOME, cannot find the state directory");
+        return ExitCode::FAILURE;
+    };
+    let Some(self_bin) = own_path() else {
+        eprintln!("herdr-nudge: cannot find my own path, nothing would be clickable");
+        return ExitCode::FAILURE;
+    };
+    let Some(plugin_root) =
+        env_path("HERDR_PLUGIN_ROOT").or_else(|| context::plugin_root_above(&self_bin))
+    else {
+        eprintln!(
+            "herdr-nudge: no herdr-plugin.toml above {}, cannot find the notifier",
+            self_bin.display()
+        );
+        return ExitCode::FAILURE;
+    };
+
+    let system = System::default();
+    let herdr_bin = herdr_bin();
+    let config = match config::locate_dir(env_path("HERDR_PLUGIN_CONFIG_DIR"), &herdr_bin, &system)
+    {
+        Ok(dir) => load_config(&dir),
+        Err(e) => {
+            eprintln!("herdr-nudge: could not find the config directory ({e}), using defaults");
+            Config::default()
+        }
+    };
+
+    let deps = handler::Deps {
+        config: &config,
+        state: &state,
+        herdr_bin: &herdr_bin,
+        socket_path: &socket_path,
+        notifier_bin: &notifier::binary_path(&plugin_root),
+        self_bin: &self_bin,
+        plugin_root: &plugin_root,
+        runner: &system,
+        spawner: &system,
+        now_ms: herdr_nudge::state::now_ms(),
+        pid: std::process::id(),
+    };
+    let kind = if shell {
+        PaneKind::Shell
+    } else {
+        PaneKind::Agent
+    };
+    let report = handler::test(&deps, &pane_id, kind);
+    for note in report.notes {
+        eprintln!("herdr-nudge: {note}");
+    }
+    match report.outcome {
+        handler::Outcome::Posted(posted) => {
+            println!(
+                "posted \"{}\" for {pane_id}; click it from another pane or app to come back here",
+                posted.title
+            );
+            ExitCode::SUCCESS
+        }
+        other => {
+            eprintln!("herdr-nudge: nothing posted: {other:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// A config we can't parse falls back to defaults rather than going quiet.
+/// One typo must not be able to stop notifications, and defaults announce
+/// themselves. The cost is that the whole file reverts, so `enabled =
+/// false` goes back to true until it's fixed; `doctor` reports it.
+fn load_config(dir: &Path) -> Config {
+    Config::load(dir).unwrap_or_else(|err| {
+        eprintln!("herdr-nudge: {err} — using defaults");
+        Config::default()
+    })
+}
+
+fn env_string(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// A pane's shell has `HERDR_BIN_PATH`; any other shell finds `herdr` on
+/// its `PATH`.
+fn herdr_bin() -> PathBuf {
+    env_path("HERDR_BIN_PATH").unwrap_or_else(|| PathBuf::from("herdr"))
+}
+
 /// Our own absolute path, for the click command.
 ///
 /// Resolved through symlinks so the path still works from a process that
@@ -200,6 +333,7 @@ fn mode_name(mode: &Mode) -> &'static str {
         Mode::Click(_) => "--click",
         Mode::Cleanup => "--cleanup",
         Mode::Doctor => "doctor",
+        Mode::ExampleConfig => "example-config",
         Mode::Test { .. } => "test",
         Mode::Help => "--help",
         Mode::Version => "--version",

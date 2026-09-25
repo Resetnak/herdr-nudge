@@ -234,14 +234,14 @@ fn a_pane_we_could_not_ask_about_is_a_shell_unless_catalogued() {
 #[test]
 fn the_config_lists_decide_the_same_labels_as_the_shared_catalogue() {
     let config = Config::parse(
-        "[shell]\nknown_agents_extra = [\"aider\", \"both\"]\nknown_agents_remove = [\"pi\", \"both\"]\n",
+        "[shell]\nknown_agents_extra = [\"aider\", \"both\"]\nknown_agents_remove = [\"pi\", \"both\", \"mastracode\"]\n",
     )
     .unwrap();
     let manifests = manifests();
     let catalogue = config.agent_catalogue(manifests.iter().map(String::as_str));
 
     let mut labels: BTreeSet<&str> = manifests.iter().map(String::as_str).collect();
-    labels.extend(["aider", "both", "pi", "make", "sudo"]);
+    labels.extend(["aider", "both", "pi", "make", "sudo", "omp", "mastracode"]);
     for label in labels {
         // No session, so only the labels can decide.
         let kind = classify(&config, &manifests, Some(label), Some(false)).kind;
@@ -283,4 +283,25 @@ fn an_explicit_null_session_is_no_session() {
             signal: ClassifySignal::Neither,
         }
     );
+}
+
+/// Herdr integrates `omp` and `mastracode` but has no manifest for either,
+/// so `agent-manifests` never names them. They count as catalogued anyway,
+/// and `known_agents_remove` still overrides that.
+#[test]
+fn agents_herdr_integrates_without_a_manifest_are_agents() {
+    let manifests = manifests();
+    assert!(
+        !manifests.contains("omp") && !manifests.contains("mastracode"),
+        "agent-manifests now names them; the built-in list can go"
+    );
+    for label in herdr_nudge::herdr::AGENTS_WITHOUT_MANIFEST {
+        let got = classify(&Config::default(), &manifests, Some(label), Some(false));
+        assert_eq!(got.kind, PaneKind::Agent, "{label}");
+        assert_eq!(got.signal, ClassifySignal::Catalogue, "{label}");
+    }
+
+    let config = Config::parse("[shell]\nknown_agents_remove = [\"omp\"]\n").unwrap();
+    let got = classify(&config, &manifests, Some("omp"), Some(false));
+    assert_eq!(got.kind, PaneKind::Shell, "known_agents_remove = [omp]");
 }

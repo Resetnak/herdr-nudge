@@ -140,7 +140,12 @@ fn the_catalogue_applies_extra_then_remove() {
     assert!(catalogue.contains("aider"), "known_agents_extra not added");
     assert!(!catalogue.contains("pi"), "known_agents_remove not removed");
     assert!(!catalogue.contains("both"), "remove should win over extra");
-    assert_eq!(catalogue.len(), fetched.len());
+    assert!(
+        catalogue.contains("omp") && catalogue.contains("mastracode"),
+        "agents Herdr integrates without a manifest are missing"
+    );
+    // + aider, - pi, + the two above.
+    assert_eq!(catalogue.len(), fetched.len() + 2);
 }
 
 #[test]
@@ -186,4 +191,124 @@ fn shell_env_drops_values_that_would_break_a_line() {
     assert!(text.contains("ignore=ok\n"));
     assert_eq!(text.lines().filter(|l| l.starts_with("ignore=")).count(), 1);
     assert_eq!(skipped, ["two words", "new\nline", "", "tab\there"]);
+}
+
+/// The two lists this plugin ships with opinions in.
+#[test]
+fn default_lists() {
+    let shell = Config::default().shell;
+    for program in ["vim", "less", "ssh", "tmux", "htop", "fzf"] {
+        assert!(
+            shell.ignore_commands.iter().any(|c| c == program),
+            "{program} missing from default ignore_commands"
+        );
+    }
+    // `python` is also `python train.py`, which is worth a banner.
+    for program in ["python", "python3", "node", "git"] {
+        assert!(
+            !shell.ignore_commands.iter().any(|c| c == program),
+            "{program} is in default ignore_commands"
+        );
+    }
+    assert!(shell.known_agents_extra.is_empty());
+}
+
+#[test]
+fn the_example_config_is_the_defaults() {
+    let text = herdr_nudge::config::example();
+    assert_eq!(Config::parse(&text).unwrap(), Config::default(), "{text}");
+}
+
+/// Parsing back to the defaults would still pass with a key left out, so
+/// compare the keys with what `Config` has.
+#[test]
+fn the_example_config_names_every_key() {
+    fn keys(value: &serde_json::Value, prefix: &str, out: &mut BTreeSet<String>) {
+        if let serde_json::Value::Object(map) = value {
+            for (key, value) in map {
+                let path = format!("{prefix}{key}");
+                keys(value, &format!("{path}."), out);
+                out.insert(path);
+            }
+        }
+    }
+    let mut expected = BTreeSet::new();
+    keys(
+        &serde_json::to_value(Config::default()).unwrap(),
+        "",
+        &mut expected,
+    );
+
+    let text = herdr_nudge::config::example();
+    // Written out commented, since setting it pins one terminal.
+    assert!(text.contains("\n# default_terminal = \""), "{text}");
+    let uncommented = text.replace("# default_terminal = ", "default_terminal = ");
+    let parsed: toml::Table = toml::from_str(&uncommented).unwrap();
+    let mut found = BTreeSet::new();
+    keys(&serde_json::to_value(parsed).unwrap(), "", &mut found);
+
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn example_config_writes_a_new_file_and_its_directory() {
+    let dir = scratch_dir("example_config_new").join("not/there/yet");
+
+    assert!(herdr_nudge::config::write_example(&dir).unwrap());
+    assert_eq!(
+        fs::read_to_string(Config::path(&dir)).unwrap(),
+        herdr_nudge::config::example()
+    );
+    assert_eq!(names_in(&dir), ["config.toml"], "temp file left behind");
+}
+
+fn names_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn example_config_never_replaces_a_file() {
+    let dir = scratch_dir("example_config_exists");
+    let path = Config::path(&dir);
+    fs::write(&path, "sound = true\n").unwrap();
+
+    assert!(!herdr_nudge::config::write_example(&dir).unwrap());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "sound = true\n");
+    assert_eq!(names_in(&dir), ["config.toml"], "temp file left behind");
+
+    // A dotfiles setup links the file in; the link's target is left alone
+    // too, even when it doesn't exist yet.
+    let linked = scratch_dir("example_config_symlink");
+    let target = linked.join("elsewhere.toml");
+    std::os::unix::fs::symlink(&target, Config::path(&linked)).unwrap();
+    assert!(!herdr_nudge::config::write_example(&linked).unwrap());
+    assert!(!target.exists(), "wrote through a dangling symlink");
+    assert_eq!(names_in(&linked), ["config.toml"], "temp file left behind");
+}
+
+#[test]
+fn the_config_dir_comes_from_the_env_before_herdr() {
+    let replay = Replay::new([]);
+    let dir = herdr_nudge::config::locate_dir(
+        Some("/from/env".into()),
+        std::path::Path::new("/x/herdr"),
+        &replay,
+    )
+    .unwrap();
+    assert_eq!(dir, std::path::Path::new("/from/env"));
+    assert_eq!(replay.call_count(), 0, "asked herdr though the env had it");
+
+    let replay = Replay::new([Recorded::cli("plugin-config-dir")]);
+    let dir =
+        herdr_nudge::config::locate_dir(None, std::path::Path::new("/x/herdr"), &replay).unwrap();
+    assert_eq!(
+        dir,
+        std::path::Path::new("/Users/dev/.config/herdr/plugins/config/herdr-nudge"),
+        "plugin-config-dir's answer"
+    );
 }

@@ -151,6 +151,9 @@ belong to the probe; tests should override them.
 | `cli/pane-get-after-release` | p | the same pane after `release-agent`: no `agent`, `unknown` status, `title` and `state_labels` left behind |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
 | `cli/plugin-config-dir` | – | where Herdr keeps this plugin's config: a bare path, not JSON |
+| `cli/workspace-get` | – | 0.9.1: a workspace's `label`, which a pane's own environment doesn't carry |
+| `cli/workspace-get-not-found` | – | 0.9.1: `workspace_not_found` on stderr, exit 1 |
+| `cli/workspace-get-empty-label` | – | 0.9.1: made with `workspace create --label ""`, and `label` comes back `""`. Without `--label`, Herdr names it after the cwd |
 | `socket/pane-focus-ok` | p | the focus call a click makes; reply is `{"id","result"}` |
 | `socket/pane-focus-not-found` | p | `pane_not_found`, the error reply shape |
 | `sys/lsappinfo-front` | – | the frontmost app's ASN |

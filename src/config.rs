@@ -11,13 +11,18 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::event::AgentStatus;
+use crate::herdr::{self, Cli};
+use crate::process::Runner;
+use crate::state::PLUGIN_ID;
 
 pub const FILE_NAME: &str = "config.toml";
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+/// `Serialize` is there so a test can check that [`example`] names every
+/// key; nothing writes a config this way.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub default_terminal: Option<String>,
@@ -26,7 +31,7 @@ pub struct Config {
     pub shell: Shell,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Notifications {
     /// How long a notification can still be clicked from Notification
@@ -43,7 +48,7 @@ pub struct Notifications {
     pub agent_logos: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Agents {
     pub enabled: bool,
@@ -55,7 +60,7 @@ pub struct Agents {
     pub ignore: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shell {
     pub enabled: bool,
@@ -101,14 +106,23 @@ impl Default for Shell {
             min_seconds: 5,
             statuses: vec![AgentStatus::Idle, AgentStatus::Done],
             notify_on_failure_only: false,
-            ignore_commands: ["vim", "nvim", "less", "man", "ssh", "top", "htop"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            // Programs that only end when the user quits them, so "finished"
+            // says nothing, and a claim would list the pane as working in
+            // Herdr the whole time they're open. No REPLs: `python`
+            // can't be told apart from `python train.py`, and a REPL is quit
+            // at its own pane, where the banner is suppressed anyway.
+            ignore_commands: strings(&[
+                "vim", "vi", "nvim", "emacs", "nano", "less", "more", "man", "ssh", "mosh", "tmux",
+                "screen", "zellij", "top", "htop", "btop", "lazygit", "tig", "fzf",
+            ]),
             known_agents_extra: Vec::new(),
             known_agents_remove: Vec::new(),
         }
     }
+}
+
+fn strings(words: &[&str]) -> Vec<String> {
+    words.iter().map(|s| s.to_string()).collect()
 }
 
 /// Only real statuses. `AgentStatus` itself turns any unknown word into
@@ -177,14 +191,18 @@ impl Config {
         Ok(())
     }
 
-    /// Herdr's agent catalogue with our config applied on top: `extra`
-    /// added, then `remove` taken out. So a label in both lists ends up
-    /// removed.
+    /// Herdr's agent catalogue, plus the agents it integrates without a
+    /// manifest, with our config applied on top: `extra` added, then
+    /// `remove` taken out. So a label in both lists ends up removed.
     pub fn agent_catalogue<'a>(
         &self,
         fetched: impl IntoIterator<Item = &'a str>,
     ) -> BTreeSet<String> {
-        let mut catalogue: BTreeSet<String> = fetched.into_iter().map(str::to_owned).collect();
+        let mut catalogue: BTreeSet<String> = fetched
+            .into_iter()
+            .chain(herdr::AGENTS_WITHOUT_MANIFEST.iter().copied())
+            .map(str::to_owned)
+            .collect();
         catalogue.extend(self.shell.known_agents_extra.iter().cloned());
         for label in &self.shell.known_agents_remove {
             catalogue.remove(label);
@@ -226,4 +244,152 @@ pub fn shell_env(config: &Config, catalogue: &BTreeSet<String>) -> (String, Vec<
     list("agent", &mut catalogue.iter());
 
     (out, skipped)
+}
+
+/// Where `config.toml` lives. A hook has `HERDR_PLUGIN_CONFIG_DIR`; from a
+/// shell, `herdr` says, without needing the server. `from_env` is the
+/// variable if it's set and not empty.
+pub fn locate_dir<R: Runner>(
+    from_env: Option<PathBuf>,
+    herdr_bin: &Path,
+    runner: &R,
+) -> Result<PathBuf, herdr::Error> {
+    match from_env {
+        Some(dir) => Ok(dir),
+        None => Cli {
+            bin: herdr_bin,
+            runner,
+        }
+        .plugin_config_dir(PLUGIN_ID),
+    }
+}
+
+/// Writes [`example`] to `config.toml` in `config_dir`, creating the
+/// directory if it has to. Returns false, having written nothing, if there
+/// is already a file there, or a symlink, even one pointing nowhere.
+///
+/// Written to a temp file and linked into place, so a hook never reads half
+/// a file and a failed write leaves nothing behind. A link, unlike a rename,
+/// fails if the name is taken, so nothing is ever replaced.
+pub fn write_example(config_dir: &Path) -> io::Result<bool> {
+    fs::create_dir_all(config_dir)?;
+    let path = Config::path(config_dir);
+    let temp = config_dir.join(format!(".{FILE_NAME}.{}.tmp", std::process::id()));
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .and_then(|mut file| {
+            io::Write::write_all(&mut file, example().as_bytes())?;
+            file.sync_all()
+        })
+        .and_then(|()| fs::hard_link(&temp, &path));
+    // Whether the link worked or not, the temp name has to go.
+    let _ = fs::remove_file(&temp);
+    match written {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// A `config.toml` with every key at its default and a line or two on each.
+///
+/// The values come from `Config::default()`, so they can't drift from it.
+/// `default_terminal` stays commented out: set, it beats the terminal found
+/// from the attached client, and would pin one terminal for good.
+pub fn example() -> String {
+    let d = Config::default();
+    let n = &d.notifications;
+    let a = &d.agents;
+    let sh = &d.shell;
+    format!(
+        r#"# herdr-nudge settings. Every key is shown at its default, so delete
+# any you don't change. A list you set replaces the default list whole. A key this version doesn't know is an error, and
+# then the whole file is ignored until it's fixed (the plugin log says so).
+#
+# Most changes apply from the next notification. The zsh hook's settings
+# ([shell] enabled, min_seconds, ignore_commands and the known_agents lists)
+# reach it only after a Herdr restart, in shells started after that.
+
+# The app a click brings forward, by bundle id. Left unset, it's the
+# terminal of the Herdr client you used last, and a switch to another
+# terminal is followed. Set it only if that guess is wrong: it then always
+# wins.
+# default_terminal = "com.mitchellh.ghostty"
+
+[notifications]
+# How long a notification can still be clicked in Notification Center.
+# How long a banner stays on screen is macOS's Banners/Alerts setting.
+clickable_secs = {clickable_secs}
+# Herdr usually plays its own sound for the same event; true adds ours.
+sound = {sound}
+# The agent's logo on the right of the banner.
+agent_logos = {agent_logos}
+
+[agents]
+# AI agent panes: Claude, Codex and the others Herdr knows.
+enabled = {agents_enabled}
+# Any of "idle", "working", "blocked", "done".
+statuses = {agents_statuses}
+# Agents to stay quiet about, by Herdr's label ("claude", "codex"), not the
+# name on the banner.
+ignore = {agents_ignore}
+
+[shell]
+# Long shell commands, from the zsh hook or any other shell reporter.
+enabled = {shell_enabled}
+# How long a command runs before the zsh hook reports it.
+min_seconds = {min_seconds}
+# Herdr turns a finished command's "idle" into "done" when you weren't
+# looking at the pane, so both are here.
+statuses = {shell_statuses}
+notify_on_failure_only = {notify_on_failure_only}
+# Commands to stay quiet about. They end when you quit them, so a banner
+# would say nothing. Matched on the command's name alone: "git" would mean
+# all of git.
+ignore_commands = {ignore_commands}
+# Labels to treat as AI agents, or as shell commands, whatever Herdr says.
+# The zsh hook leaves agents alone, since they report themselves.
+# Herdr's own agents are already known and need no entry here.
+known_agents_extra = {known_agents_extra}
+known_agents_remove = {known_agents_remove}
+"#,
+        clickable_secs = n.clickable_secs,
+        sound = n.sound,
+        agent_logos = n.agent_logos,
+        agents_enabled = a.enabled,
+        agents_statuses = toml_array(a.statuses.iter().map(|s| s.as_str())),
+        agents_ignore = toml_array(a.ignore.iter().map(String::as_str)),
+        shell_enabled = sh.enabled,
+        min_seconds = sh.min_seconds,
+        shell_statuses = toml_array(sh.statuses.iter().map(|s| s.as_str())),
+        notify_on_failure_only = sh.notify_on_failure_only,
+        ignore_commands = toml_array(sh.ignore_commands.iter().map(String::as_str)),
+        known_agents_extra = toml_array(sh.known_agents_extra.iter().map(String::as_str)),
+        known_agents_remove = toml_array(sh.known_agents_remove.iter().map(String::as_str)),
+    )
+}
+
+/// One line if it fits, else wrapped, a few entries per line. A JSON
+/// string is also a valid TOML basic string, escapes included.
+fn toml_array<'a>(items: impl Iterator<Item = &'a str>) -> String {
+    let items: Vec<String> = items
+        .map(|item| serde_json::to_string(item).expect("a str always serializes"))
+        .collect();
+    let one_line = format!("[{}]", items.join(", "));
+    if one_line.len() <= 60 {
+        return one_line;
+    }
+    let mut out = String::from("[");
+    let mut line = String::new();
+    for item in items {
+        if !line.is_empty() && line.len() + item.len() + 2 > 72 {
+            out.push_str(&format!("\n {}", line.trim_end()));
+            line.clear();
+        }
+        line.push_str(&format!(" {item},"));
+    }
+    out.push_str(&format!("\n {}\n]", line.trim_end()));
+    out
 }

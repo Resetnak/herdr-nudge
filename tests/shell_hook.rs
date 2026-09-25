@@ -48,7 +48,7 @@ fn install_writes_the_hook_and_settings_from_the_config() {
 
     assert_eq!(read(&state.shell_hook_path()), SCRIPT);
     let config = Config::parse(toml).unwrap();
-    let agents = ["claude", "codex"].map(String::from).into();
+    let agents = config.agent_catalogue(["claude", "codex"]);
     assert_eq!(read(&state.shell_env_path()), shell_env(&config, &agents).0);
     assert_eq!(
         replay.call_count(),
@@ -116,7 +116,10 @@ fn install_without_an_agent_list_says_so() {
 
     let notes = shell_hook::install(&state, None, None, None, &Replay::new([]));
 
-    assert!(!read(&state.shell_env_path()).contains("agent="));
+    // Only the agents Herdr integrates without a manifest are left.
+    let env = read(&state.shell_env_path());
+    let agents: Vec<_> = env.lines().filter(|l| l.starts_with("agent=")).collect();
+    assert_eq!(agents, ["agent=mastracode", "agent=omp"], "{env}");
     assert!(
         notes.iter().any(|n| n.contains("no agent list")),
         "{notes:?}"

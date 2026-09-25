@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "workspace",
+    "get",
+    "w3"
+  ],
+  "captured_at": "2026-09-24T19:27:50",
+  "herdr_version": "herdr 0.9.1",
+  "exit_code": 0,
+  "stdout": "{\"id\":\"cli:workspace:get\",\"result\":{\"type\":\"workspace_info\",\"workspace\":{\"active_tab_id\":\"w3:t1\",\"agent_status\":\"working\",\"focused\":true,\"label\":\"herdr-nudge\",\"number\":3,\"pane_count\":2,\"tab_count\":1,\"workspace_id\":\"w3\"}}}\n",
+  "stderr": ""
+}

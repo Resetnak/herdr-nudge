@@ -150,7 +150,7 @@ fn a_blocked_agent_posts_a_notification() {
     assert_eq!(posted.kind, PaneKind::Agent, "agent/blocked pane kind");
     assert_eq!(
         posted.signal,
-        ClassifySignal::Catalogue,
+        Some(ClassifySignal::Catalogue),
         "claude is in the remembered manifests"
     );
     assert_eq!(posted.group, "herdr-nudge-w1:p1", "agent/blocked group");
@@ -516,7 +516,7 @@ fn a_shell_command_is_classified_and_titled_as_one() {
     assert_eq!(posted.kind, PaneKind::Shell, "make is not a known agent");
     assert_eq!(
         posted.signal,
-        ClassifySignal::Neither,
+        Some(ClassifySignal::Neither),
         "no catalogue entry and no session"
     );
     assert_eq!(posted.title, "make · failed", "shell title");
@@ -1128,7 +1128,7 @@ fn a_missing_agent_list_is_fetched_and_kept() {
     };
     assert_eq!(
         posted.signal,
-        ClassifySignal::Catalogue,
+        Some(ClassifySignal::Catalogue),
         "claude is in agent-manifests-0.9.1"
     );
     let Ok(Loaded::Found(cache)) = harness.state.agents_cache() else {
@@ -1280,5 +1280,157 @@ fn sweeping_a_leftover_leaves_the_live_banner_up() {
         harness.state.job_ids().unwrap(),
         ids,
         "only the live job left"
+    );
+}
+
+/// `herdr-nudge test`, run in the pane `cli/pane-get-focused` describes,
+/// with the terminal in front: everything that makes an event `Watching`.
+fn test_harness(test_name: &str, workspace_get: &str) -> Harness {
+    // Asked about w3, whatever workspace the recording was captured against.
+    let mut workspace = Recorded::cli(workspace_get);
+    workspace.argv = ["herdr", "workspace", "get", "w3"].map(String::from).into();
+    let mut harness = Harness::new(
+        test_name,
+        vec![
+            Recorded::cli("pane-get-focused"),
+            workspace,
+            Recorded::sys("lsappinfo-front"),
+            Recorded::sys("lsappinfo-bundleid-ghostty"),
+        ],
+    );
+    harness.config.default_terminal = Some("com.mitchellh.ghostty".to_owned());
+    harness
+}
+
+#[test]
+fn test_posts_for_its_own_pane_though_the_user_is_watching() {
+    let harness = test_harness("test_agent", "workspace-get");
+
+    let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
+    let Outcome::Posted(posted) = report.outcome else {
+        panic!("test on pane-get-focused did not post: {report:?}");
+    };
+    assert_eq!(posted.title, "Herdr Nudge · blocked", "test title");
+    assert_eq!(posted.kind, PaneKind::Agent, "test kind");
+    assert_eq!(posted.signal, None, "test is not classified");
+
+    let argv = harness.spy.only();
+    assert_eq!(
+        Spy::arg_after(&argv, "-subtitle").as_deref(),
+        Some("herdr-nudge"),
+        "subtitle should be workspace-get's label"
+    );
+    assert_eq!(
+        Spy::arg_after(&argv, "-group").as_deref(),
+        Some("herdr-nudge-w3:p1")
+    );
+    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
+        panic!("test wrote no job, so its click would do nothing");
+    };
+    assert_eq!(job.pane_id, "w3:p1");
+    assert_eq!(job.workspace_id, "w3", "workspace from pane-get-focused");
+    assert_eq!(job.bundle_id.as_deref(), Some("com.mitchellh.ghostty"));
+    assert_eq!(
+        Spy::arg_after(&argv, "-execute"),
+        Some(format!(
+            "'{}' --click {}",
+            harness.self_bin.display(),
+            posted.job_id
+        )),
+    );
+}
+
+#[test]
+fn test_shell_looks_like_a_finished_command() {
+    let harness = test_harness("test_shell", "workspace-get");
+
+    let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Shell);
+    let Outcome::Posted(posted) = report.outcome else {
+        panic!("test --shell did not post: {report:?}");
+    };
+    assert_eq!(posted.title, "herdr-nudge · done", "test --shell title");
+    assert_eq!(
+        Spy::arg_after(&harness.spy.only(), "-message").as_deref(),
+        Some("herdr-nudge test --shell · exit 0 · 0s"),
+    );
+    let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
+        panic!("test --shell wrote no job");
+    };
+    assert_eq!(job.kind, PaneKind::Shell);
+    assert_eq!(job.status, AgentStatus::Done);
+}
+
+#[test]
+fn test_replaces_the_panes_banner() {
+    let harness = test_harness("test_replaces", "workspace-get");
+    let first = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
+    let Outcome::Posted(first) = first.outcome else {
+        panic!("first test did not post");
+    };
+
+    let second = handler::test(&harness.deps(), "w3:p1", PaneKind::Shell);
+    let Outcome::Posted(second) = second.outcome else {
+        panic!("second test did not post");
+    };
+    assert_ne!(first.job_id, second.job_id);
+    assert_eq!(
+        harness.state.job_ids().unwrap(),
+        vec![second.job_id],
+        "only the second test's job should be left"
+    );
+    assert_eq!(
+        removes(&harness.spy),
+        Vec::<String>::new(),
+        "same group, so the second post replaces the first on screen"
+    );
+}
+
+#[test]
+fn test_without_a_workspace_label_uses_the_id() {
+    let harness = test_harness("test_no_label", "workspace-get-not-found");
+
+    let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
+    assert!(matches!(report.outcome, Outcome::Posted(_)), "{report:?}");
+    assert_eq!(
+        Spy::arg_after(&harness.spy.only(), "-subtitle").as_deref(),
+        Some("w3")
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("workspace_not_found")),
+        "{:?}",
+        report.notes
+    );
+}
+
+#[test]
+fn test_in_a_pane_herdr_doesnt_know_posts_nothing() {
+    let harness = test_harness("test_unknown_pane", "workspace-get");
+
+    let report = handler::test(&harness.deps(), "w9:p9", PaneKind::Agent);
+    assert!(
+        matches!(report.outcome, Outcome::Failed(ref why) if why.starts_with("pane get w9:p9")),
+        "{report:?}"
+    );
+    assert!(harness.spy.spawns.borrow().is_empty(), "notifier started");
+    assert!(
+        harness.state.job_ids().unwrap().is_empty(),
+        "job left behind"
+    );
+}
+
+/// `workspace create --label ""` really does give `"label": ""`.
+#[test]
+fn test_with_an_empty_workspace_label_uses_the_id() {
+    let harness = test_harness("test_empty_label", "workspace-get-empty-label");
+
+    let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
+    assert!(matches!(report.outcome, Outcome::Posted(_)), "{report:?}");
+    assert_eq!(
+        Spy::arg_after(&harness.spy.only(), "-subtitle").as_deref(),
+        Some("w3"),
+        "workspace-get-empty-label: subtitle"
     );
 }

@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -114,3 +114,15 @@ impl fmt::Display for MissingVars {
 }
 
 impl std::error::Error for MissingVars {}
+
+/// The plugin's directory, for a command the user runs themselves, which
+/// gets no `HERDR_PLUGIN_ROOT`: the nearest directory above our binary with
+/// Herdr's manifest in it. That covers `target/release/` while developing and
+/// `bin/` once installed.
+pub fn plugin_root_above(binary: &Path) -> Option<PathBuf> {
+    binary
+        .ancestors()
+        .skip(1)
+        .find(|dir| dir.join("herdr-plugin.toml").is_file())
+        .map(Path::to_path_buf)
+}

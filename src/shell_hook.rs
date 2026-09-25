@@ -10,9 +10,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::config::{self, Config};
-use crate::herdr::Cli;
 use crate::process::Runner;
-use crate::state::{self, AgentsCache, Loaded, PLUGIN_ID, StateDir};
+use crate::state::{self, AgentsCache, Loaded, StateDir};
 
 pub const SCRIPT: &str = include_str!("../shell/herdr-nudge.zsh");
 
@@ -34,10 +33,11 @@ pub fn install<R: Runner>(
     let mut notes = Vec::new();
 
     let asked = match (config_dir, herdr_bin) {
-        (None, Some(bin)) => match (Cli { bin, runner }).plugin_config_dir(PLUGIN_ID) {
+        (None, Some(bin)) => match config::locate_dir(None, bin, runner) {
             Ok(dir) => {
-                // Logged because nobody has yet seen whether the startup
-                // hook's env has the config dir.
+                // Logged because the startup hook's env has had the config
+                // dir every time it was checked, so asking means something
+                // changed.
                 notes.push(format!(
                     "no HERDR_PLUGIN_CONFIG_DIR, herdr says {}",
                     dir.display()
