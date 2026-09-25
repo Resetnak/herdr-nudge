@@ -64,6 +64,8 @@ pub enum Outcome {
     },
     /// The shell command is in `ignore_commands`.
     IgnoredCommand(String),
+    /// The agent is in `[agents] ignore`.
+    IgnoredAgent(String),
     /// `notify_on_failure_only` is on and the command succeeded.
     NotAFailure,
     /// The user is looking at the pane in the frontmost terminal.
@@ -476,6 +478,13 @@ fn decide(
             kind: classification.kind,
             status: event.agent_status,
         });
+    }
+
+    if classification.kind == PaneKind::Agent
+        && let Some(label) = agent_label
+        && config.agents.ignore.iter().any(|a| a == label)
+    {
+        return Some(Outcome::IgnoredAgent(label.to_owned()));
     }
 
     // Checked here rather than left to our zsh hook, because any shell hook

@@ -173,6 +173,35 @@ fn a_blocked_agent_posts_a_notification() {
     );
 }
 
+/// Herdr plays its own sound for a `blocked`, so by default we add none.
+#[test]
+fn the_banner_is_silent_unless_sound_is_on() {
+    let harness = Harness::answering("silent_by_default", "w1:p1", "pane-get-unfocused");
+    harness.remember_agents(&["claude"]);
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::Posted(_)
+    ));
+    let argv = harness.spy.only();
+    assert!(
+        !argv.iter().any(|a| a == "-sound"),
+        "agent/blocked with the default config: {argv:?}"
+    );
+
+    let mut harness = Harness::answering("sound_on", "w1:p1", "pane-get-unfocused");
+    harness.config.notifications.sound = true;
+    harness.remember_agents(&["claude"]);
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::Posted(_)
+    ));
+    assert_eq!(
+        Spy::arg_after(&harness.spy.only(), "-sound").as_deref(),
+        Some("default"),
+        "agent/blocked with sound = true"
+    );
+}
+
 /// Everything the click needs has to be on disk before the banner is up,
 /// because the click gets no environment at all.
 #[test]
@@ -512,6 +541,28 @@ fn an_ignored_command_is_dropped_for_shell_panes_only() {
     assert!(
         matches!(outcome, Outcome::Posted(_)),
         "agent/blocked: ignore_commands must not mute an agent: {outcome:?}"
+    );
+}
+
+/// Keyed on the agent label, like `known_agents_extra`. A shell command
+/// with the same name is not affected.
+#[test]
+fn an_ignored_agent_is_dropped_for_agent_panes_only() {
+    let mut harness = Harness::answering("ignored_agent", "w1:p1", "pane-get-unfocused");
+    harness.config.agents.ignore = vec!["claude".to_owned()];
+    harness.remember_agents(&["claude"]);
+    assert_eq!(
+        harness.handle("agent/blocked"),
+        Outcome::IgnoredAgent("claude".to_owned()),
+        "agent/blocked: claude is in [agents] ignore"
+    );
+
+    let mut harness = Harness::answering("ignored_agent_shell", "w3:p3", "pane-get-unfocused");
+    harness.config.agents.ignore = vec!["make".to_owned()];
+    let outcome = harness.handle("shell/done-unwatched-failed");
+    assert!(
+        matches!(outcome, Outcome::Posted(_)),
+        "shell/done-unwatched-failed: [agents] ignore must not mute a shell command: {outcome:?}"
     );
 }
 

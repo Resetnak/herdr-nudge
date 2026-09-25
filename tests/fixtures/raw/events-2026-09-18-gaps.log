@@ -1,4 +1,4 @@
-22:32:14	#mark	session start: M0 gap captures (Claude in w3:p1, user focused there)
+22:32:14	#mark	session start: gap captures (Claude in w3:p1, user focused there)
 22:32:14	tab.created	{"event":"tab_created","data":{"type":"tab_created","tab":{"tab_id":"w3:t2","workspace_id":"w3","number":2,"label":"capture","focused":false,"pane_count":1,"agent_status":"unknown"}}}
 22:32:14	pane.created	{"event":"pane_created","data":{"type":"pane_created","pane":{"pane_id":"w3:p3","terminal_id":"term_65bcf56e015d4c","workspace_id":"w3","tab_id":"w3:t2","focused":false,"cwd":"/Users/dev/Developer/herdr-nudge","foreground_cwd":"/Users/dev/Developer/herdr-nudge","agent_status":"unknown","scroll":{"offset_from_bottom":0,"max_offset_from_bottom":0,"viewport_rows":59},"revision":0}}}
     HERDR_BIN_PATH=/Users/dev/.local/bin/herdr

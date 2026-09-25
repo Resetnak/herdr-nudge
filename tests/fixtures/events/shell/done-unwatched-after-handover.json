@@ -4,7 +4,7 @@
   "captured_at": "22:43:04",
   "provenance": "programmatic",
   "mark": "[programmatic] gap2 redo: seq 10-13 on w3:p4: working, metadata idle=done, idle, release (user on w3:p1)",
-  "why": "Reported idle arrives as done after working, in the handover pane (FR-1.2)",
+  "why": "Reported idle arrives as done after working, in the handover pane",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w3:p4\",\"workspace_id\":\"w3\",\"agent_status\":\"done\",\"agent\":\"make\",\"title\":\"make build · exit 0 · 2m10s\",\"display_agent\":\"make\",\"state_labels\":{\"idle\":\"done\"}}}",
   "env": {

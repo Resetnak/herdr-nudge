@@ -3,8 +3,8 @@
   "herdr_version": "0.9.0",
   "captured_at": "12:07:18",
   "provenance": "programmatic",
-  "mark": "[programmatic] socket pane.focus w3:p2 then w3:p1 (FR-6.1 check)",
-  "why": "socket pane.focus (the call FR-5.1 makes) emits pane.focused, so FR-6.1's dismiss trigger fires",
+  "mark": "[programmatic] socket pane.focus w3:p2 then w3:p1",
+  "why": "Socket pane.focus, the call a click makes, emits pane.focused for the pane",
   "event": "pane.focused",
   "event_json": "{\"event\":\"pane_focused\",\"data\":{\"type\":\"pane_focused\",\"pane_id\":\"w3:p2\",\"workspace_id\":\"w3\"}}",
   "env": {

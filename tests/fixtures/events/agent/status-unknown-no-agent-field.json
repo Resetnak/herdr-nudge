@@ -4,7 +4,7 @@
   "captured_at": "22:42:25",
   "provenance": "manual",
   "mark": "[manual] gap2 start: user answers No, then /exit claude in w3:p4",
-  "why": "Status event after Claude /exit: agent field missing entirely (FR-8.4, invariant 5)",
+  "why": "Status event after Claude /exit: agent field missing entirely",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w3:p4\",\"workspace_id\":\"w3\",\"agent_status\":\"unknown\"}}",
   "env": {

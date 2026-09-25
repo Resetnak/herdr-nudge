@@ -4,7 +4,7 @@
   "captured_at": "22:32:26",
   "provenance": "programmatic",
   "mark": "gap6: shell reporter on w3:p3 (unfocused tab w3:t2): working, metadata idle=failed, idle",
-  "why": "Reported idle on an unwatched pane arrives as done; state_labels idle=failed kept (FR-1.2, FR-1.3)",
+  "why": "Reported idle on an unwatched pane arrives as done; state_labels idle=failed kept",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w3:p3\",\"workspace_id\":\"w3\",\"agent_status\":\"done\",\"agent\":\"make\",\"title\":\"make test · exit 2 · 1m04s\",\"display_agent\":\"make\",\"state_labels\":{\"idle\":\"failed\"}}}",
   "env": {

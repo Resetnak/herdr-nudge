@@ -4,7 +4,7 @@
   "captured_at": "22:46:31",
   "provenance": "programmatic",
   "mark": "[programmatic] gap5: herdr tab focus w3:t2",
-  "why": "herdr tab focus w3:t2: burst of three in one second (FR-6.1)",
+  "why": "herdr tab focus w3:t2: burst of three in one second",
   "event": "tab.focused",
   "event_json": "{\"event\":\"tab_focused\",\"data\":{\"type\":\"tab_focused\",\"tab_id\":\"w3:t2\",\"workspace_id\":\"w3\"}}",
   "env": {

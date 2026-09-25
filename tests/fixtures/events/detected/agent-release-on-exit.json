@@ -4,7 +4,7 @@
   "captured_at": "22:42:25",
   "provenance": "manual",
   "mark": "[manual] gap2 start: user answers No, then /exit claude in w3:p4",
-  "why": "Claude /exit: released=true, final_status=idle (FR-2.4, FR-6.4)",
+  "why": "Claude /exit: released=true, final_status=idle",
   "event": "pane.agent_detected",
   "event_json": "{\"event\":\"pane_agent_detected\",\"data\":{\"type\":\"pane_agent_detected\",\"pane_id\":\"w3:p4\",\"workspace_id\":\"w3\",\"agent\":\"claude\",\"released\":true,\"final_status\":\"idle\"}}",
   "env": {

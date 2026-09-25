@@ -33,6 +33,12 @@ pub struct Notifications {
     /// Center. How long a banner stays on screen is the user's macOS
     /// Banners/Alerts setting, not something we control.
     pub clickable_secs: u64,
+    /// Off by default because Herdr usually plays its own sound for the
+    /// same `blocked` or `done`, a moment after the banner, so both on means
+    /// two sounds. With this off a banner is silent when Herdr plays nothing:
+    /// for `idle`, while no Herdr client is attached, when its `[ui.sound]`
+    /// is off or mutes that agent (droid by default), and for a `done` the
+    /// pane has already left by the time Herdr checks.
     pub sound: bool,
     pub agent_logos: bool,
 }
@@ -43,6 +49,10 @@ pub struct Agents {
     pub enabled: bool,
     #[serde(deserialize_with = "statuses")]
     pub statuses: Vec<AgentStatus>,
+    /// Agents to stay quiet about, by the label Herdr reports (`claude`,
+    /// `codex`), not the display name. Only panes classified as agents; a
+    /// shell command is muted with `[shell] ignore_commands`.
+    pub ignore: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -68,7 +78,7 @@ impl Default for Notifications {
     fn default() -> Self {
         Notifications {
             clickable_secs: 3600,
-            sound: true,
+            sound: false,
             agent_logos: true,
         }
     }
@@ -79,6 +89,7 @@ impl Default for Agents {
         Agents {
             enabled: true,
             statuses: vec![AgentStatus::Blocked, AgentStatus::Done],
+            ignore: Vec::new(),
         }
     }
 }

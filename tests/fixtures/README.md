@@ -83,7 +83,7 @@ A programmatic result is never evidence for manual behaviour, or the reverse.
   "captured_at": "HH:MM:SS",
   "provenance": "manual | programmatic | unknown",
   "mark": "the last mark.sh note before this event, or null",
-  "why": "what this case covers (FR ids)",
+  "why": "what this case covers",
   "event": "pane.agent_status_changed",
   "event_json": "<HERDR_PLUGIN_EVENT_JSON, verbatim>",
   "env": { "HERDR_...": "<verbatim>", "HERDR_PLUGIN_CONTEXT_JSON": "<verbatim>" }

@@ -4,7 +4,7 @@
   "captured_at": "17:38:34",
   "provenance": "programmatic",
   "mark": null,
-  "why": "Shell idle with no preceding working (design 5.7)",
+  "why": "Shell idle with no preceding working stays idle",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w1:p2\",\"workspace_id\":\"w1\",\"agent_status\":\"idle\",\"agent\":\"make\"}}",
   "env": {

@@ -1,4 +1,4 @@
-12:07:18	#mark	[programmatic] socket pane.focus w3:p2 then w3:p1 (FR-6.1 check)
+12:07:18	#mark	[programmatic] socket pane.focus w3:p2 then w3:p1
 12:07:18	tab.focused	{"event":"tab_focused","data":{"type":"tab_focused","tab_id":"w3:t1","workspace_id":"w3"}}
 12:07:18	workspace.focused	{"event":"workspace_focused","data":{"type":"workspace_focused","workspace_id":"w3"}}
 12:07:18	pane.focused	{"event":"pane_focused","data":{"type":"pane_focused","pane_id":"w3:p2","workspace_id":"w3"}}

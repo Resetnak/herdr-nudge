@@ -4,7 +4,7 @@
   "captured_at": "22:43:02",
   "provenance": "programmatic",
   "mark": "[programmatic] gap2 redo: seq 10-13 on w3:p4: working, metadata idle=done, idle, release (user on w3:p1)",
-  "why": "Shell reporter claims the pane Claude just left: agent -> shell handover (FR-6.4)",
+  "why": "Shell reporter claims the pane Claude just left: agent -> shell handover",
   "event": "pane.agent_detected",
   "event_json": "{\"event\":\"pane_agent_detected\",\"data\":{\"type\":\"pane_agent_detected\",\"pane_id\":\"w3:p4\",\"workspace_id\":\"w3\",\"agent\":\"make\"}}",
   "env": {

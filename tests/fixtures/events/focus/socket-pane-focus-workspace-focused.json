@@ -3,7 +3,7 @@
   "herdr_version": "0.9.0",
   "captured_at": "12:07:18",
   "provenance": "programmatic",
-  "mark": "[programmatic] socket pane.focus w3:p2 then w3:p1 (FR-6.1 check)",
+  "mark": "[programmatic] socket pane.focus w3:p2 then w3:p1",
   "why": "Same burst: workspace.focused, even though the workspace did not change",
   "event": "workspace.focused",
   "event_json": "{\"event\":\"workspace_focused\",\"data\":{\"type\":\"workspace_focused\",\"workspace_id\":\"w3\"}}",

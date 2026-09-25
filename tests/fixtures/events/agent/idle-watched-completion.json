@@ -4,7 +4,7 @@
   "captured_at": "17:28:02",
   "provenance": "manual",
   "mark": null,
-  "why": "Claude finished while watched: Herdr reports idle, not done (FR-1.4)",
+  "why": "Claude finished while watched: Herdr reports idle, not done",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"agent_status\":\"idle\",\"agent\":\"claude\"}}",
   "env": {

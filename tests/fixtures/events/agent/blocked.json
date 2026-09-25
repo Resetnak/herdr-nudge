@@ -4,7 +4,7 @@
   "captured_at": "17:29:26",
   "provenance": "manual",
   "mark": null,
-  "why": "Claude asks for permission (FR-1.1)",
+  "why": "Claude asks for permission: an agent blocked",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"agent_status\":\"blocked\",\"agent\":\"claude\"}}",
   "env": {

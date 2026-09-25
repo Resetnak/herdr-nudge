@@ -4,7 +4,7 @@
   "captured_at": "17:25:30",
   "provenance": "programmatic",
   "mark": null,
-  "why": "Shell report with title, display_agent and state_labels, watched (FR-1.2, FR-4.4)",
+  "why": "Shell report with title, display_agent and state_labels, watched",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w1:p2\",\"workspace_id\":\"w1\",\"agent_status\":\"idle\",\"agent\":\"make\",\"title\":\"make build — exit 0 in 3m12s\",\"display_agent\":\"make\",\"state_labels\":{\"idle\":\"finished\"}}}",
   "env": {

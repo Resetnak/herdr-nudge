@@ -4,7 +4,7 @@
   "captured_at": "19:55:30",
   "provenance": "manual",
   "mark": null,
-  "why": "Agent pane closed; no agent_detected release precedes it (FR-6.2)",
+  "why": "Agent pane closed; no agent_detected release precedes it",
   "event": "pane.closed",
   "event_json": "{\"event\":\"pane_closed\",\"data\":{\"type\":\"pane_closed\",\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\"}}",
   "env": {

@@ -4,7 +4,7 @@
   "captured_at": "22:33:11",
   "provenance": "programmatic",
   "mark": "gap3b [programmatic]: blocked on w3:p4 (unfocused half of tab w3:t2; tab's focused pane w3:p3; user on w3:p1)",
-  "why": "Blocked on a pane that is not its tab's focused pane; focused_pane_id is the event's pane (FR-1.4)",
+  "why": "Blocked on a pane that is not its tab's focused pane; focused_pane_id is the event's pane",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w3:p4\",\"workspace_id\":\"w3\",\"agent_status\":\"blocked\",\"agent\":\"make\"}}",
   "env": {

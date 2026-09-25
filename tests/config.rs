@@ -26,9 +26,11 @@ fn defaults() {
     let c = Config::default();
     assert_eq!(c.default_terminal, None);
     assert_eq!(c.notifications.clickable_secs, 3600);
-    assert!(c.notifications.sound && c.notifications.agent_logos);
+    assert!(!c.notifications.sound, "notifications.sound default");
+    assert!(c.notifications.agent_logos);
     assert!(c.agents.enabled && c.shell.enabled);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked, AgentStatus::Done]);
+    assert!(c.agents.ignore.is_empty());
     assert_eq!(c.shell.statuses, [AgentStatus::Idle, AgentStatus::Done]);
     assert_eq!(c.shell.min_seconds, 5);
     assert!(!c.shell.notify_on_failure_only);
@@ -42,12 +44,13 @@ default_terminal = "com.mitchellh.ghostty"
 
 [notifications]
 clickable_secs = 600
-sound = false
+sound = true
 agent_logos = false
 
 [agents]
 enabled = true
 statuses = ["blocked"]
+ignore = ["codex"]
 
 [shell]
 enabled = false
@@ -63,8 +66,9 @@ known_agents_remove = ["pi"]
 
     assert_eq!(c.default_terminal.as_deref(), Some("com.mitchellh.ghostty"));
     assert_eq!(c.notifications.clickable_secs, 600);
-    assert!(!c.notifications.sound);
+    assert!(c.notifications.sound);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked]);
+    assert_eq!(c.agents.ignore, ["codex"]);
     assert!(!c.shell.enabled);
     assert_eq!(c.shell.min_seconds, 12);
     assert_eq!(c.shell.statuses, [AgentStatus::Done]);

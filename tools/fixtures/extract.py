@@ -12,8 +12,9 @@ Parses a probe log (tools/probe/dump.sh format) and writes one JSON file per
 selected record. Nothing is hand-written: `event_json` and every env value are
 copied byte-for-byte from the log. Records are selected by the 1-based line
 number of their header line in a raw log, so SELECTIONS stays stable as long
-as raw logs are never edited. Lines written by tools/probe/mark.sh are kept
-as "#mark" records and attached to the fixtures that follow them.
+as no raw log gains or loses a line. What Herdr wrote is never edited. Lines
+written by tools/probe/mark.sh are kept as "#mark" records and attached to the
+fixtures that follow them; those notes are ours and may be reworded.
 """
 import json
 import os
@@ -34,7 +35,7 @@ SYS = os.path.join(ROOT, "tests/fixtures/sys")
 # Session ids are mapped in order of first appearance, stably across files, so
 # two fixtures referring to one session still agree. Deliberately NOT redacted:
 # pane/workspace ids, timestamps, and terminal titles naming this project's own
-# work — they are fixture content, and FR-4.4 composes notifications from them.
+# work — they are fixture content, and notifications are composed from them.
 REDACTIONS = [("justinchiasson", "dev"), ("Justins-MacBook-Pro", "dev-mac")]
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 PLACEHOLDER = "00000000-0000-4000-8000-%012d"
@@ -104,40 +105,40 @@ HERDR_VERSIONS = {
 # {raw log: [(category, name, header line, provenance, why)]}
 SELECTIONS = {
     "events-2026-09-18.log": [
-        ("agent", "blocked", 118, "manual", "Claude asks for permission (FR-1.1)"),
-        ("agent", "done", 430, "manual", "Claude finished while the user was away: the unwatched completion (FR-1.1, FR-1.4)"),
-        ("agent", "idle-watched-completion", 92, "manual", "Claude finished while watched: Herdr reports idle, not done (FR-1.4)"),
+        ("agent", "blocked", 118, "manual", "Claude asks for permission: an agent blocked"),
+        ("agent", "done", 430, "manual", "Claude finished while the user was away: the unwatched completion"),
+        ("agent", "idle-watched-completion", 92, "manual", "Claude finished while watched: Herdr reports idle, not done"),
         ("agent", "working", 105, "manual", "Claude working: never notifies"),
         ("agent", "idle-first-after-claim", 832, "manual", "First status after Claude claimed a pane a shell reporter had released"),
-        ("shell", "idle-with-title-labels", 1, "programmatic", "Shell report with title, display_agent and state_labels, watched (FR-1.2, FR-4.4)"),
+        ("shell", "idle-with-title-labels", 1, "programmatic", "Shell report with title, display_agent and state_labels, watched"),
         ("shell", "blocked-with-title-labels", 14, "programmatic", "Shell reporter sending blocked, all optional fields present"),
         ("shell", "blocked-bare", 27, "programmatic", "Shell report with no title, display_agent or state_labels (fields missing, not null)"),
-        ("shell", "idle-without-working", 327, "programmatic", "Shell idle with no preceding working (design 5.7)"),
-        ("shell", "status-unknown-on-release", 40, "programmatic", "agent_status \"unknown\" sent when the reporter releases (FR-8.4)"),
+        ("shell", "idle-without-working", 327, "programmatic", "Shell idle with no preceding working stays idle"),
+        ("shell", "status-unknown-on-release", 40, "programmatic", "agent_status \"unknown\" sent when the reporter releases"),
         ("detected", "shell-claim", 326, "programmatic", "Shell reporter claims a pane: no released/final_status fields"),
-        ("detected", "shell-release", 41, "programmatic", "Shell reporter releases: released=true, final_status (FR-2.4)"),
-        ("detected", "agent-claim-after-shell-release", 819, "manual", "Claude detected in a pane a shell reporter used earlier (FR-2.4, FR-6.4)"),
-        ("lifecycle", "pane-closed", 807, "manual", "Agent pane closed; no agent_detected release precedes it (FR-6.2)"),
+        ("detected", "shell-release", 41, "programmatic", "Shell reporter releases: released=true, final_status"),
+        ("detected", "agent-claim-after-shell-release", 819, "manual", "Claude detected in a pane a shell reporter used earlier"),
+        ("lifecycle", "pane-closed", 807, "manual", "Agent pane closed; no agent_detected release precedes it"),
         ("lifecycle", "pane-created", 1222, "unknown", "New plain pane: nested pane object, not flat fields"),
     ],
     "events-2026-09-18-gaps.log": [
-        ("agent", "blocked-user-elsewhere", 939, "manual", "Claude blocked 24 s after the user moved to another pane; focused_pane_id is still the event's pane (FR-1.4)"),
-        ("agent", "done-user-elsewhere", 833, "manual", "Claude done ~20 s after the user moved away; focused_pane_id is still the event's pane (FR-1.4)"),
-        ("agent", "status-unknown-no-agent-field", 1071, "manual", "Status event after Claude /exit: agent field missing entirely (FR-8.4, invariant 5)"),
-        ("detected", "agent-release-on-exit", 1058, "manual", "Claude /exit: released=true, final_status=idle (FR-2.4, FR-6.4)"),
-        ("detected", "shell-claim-after-agent-exit", 1232, "programmatic", "Shell reporter claims the pane Claude just left: agent -> shell handover (FR-6.4)"),
-        ("shell", "done-unwatched-failed", 94, "programmatic", "Reported idle on an unwatched pane arrives as done; state_labels idle=failed kept (FR-1.2, FR-1.3)"),
-        ("shell", "done-unwatched-after-handover", 1258, "programmatic", "Reported idle arrives as done after working, in the handover pane (FR-1.2)"),
-        ("shell", "working-metadata-update", 81, "programmatic", "report-metadata alone emits a status event with an unchanged status (FR-1.5)"),
-        ("shell", "blocked-unfocused-pane", 203, "programmatic", "Blocked on a pane that is not its tab's focused pane; focused_pane_id is the event's pane (FR-1.4)"),
+        ("agent", "blocked-user-elsewhere", 939, "manual", "Claude blocked 24 s after the user moved to another pane; focused_pane_id is still the event's pane"),
+        ("agent", "done-user-elsewhere", 833, "manual", "Claude done ~20 s after the user moved away; focused_pane_id is still the event's pane"),
+        ("agent", "status-unknown-no-agent-field", 1071, "manual", "Status event after Claude /exit: agent field missing entirely"),
+        ("detected", "agent-release-on-exit", 1058, "manual", "Claude /exit: released=true, final_status=idle"),
+        ("detected", "shell-claim-after-agent-exit", 1232, "programmatic", "Shell reporter claims the pane Claude just left: agent -> shell handover"),
+        ("shell", "done-unwatched-failed", 94, "programmatic", "Reported idle on an unwatched pane arrives as done; state_labels idle=failed kept"),
+        ("shell", "done-unwatched-after-handover", 1258, "programmatic", "Reported idle arrives as done after working, in the handover pane"),
+        ("shell", "working-metadata-update", 81, "programmatic", "report-metadata alone emits a status event with an unchanged status, so the same status arrives twice"),
+        ("shell", "blocked-unfocused-pane", 203, "programmatic", "Blocked on a pane that is not its tab's focused pane; focused_pane_id is the event's pane"),
         ("lifecycle", "tab-created", 2, "programmatic", "herdr tab create --no-focus"),
-        ("focus", "tab-focus-tab-focused", 1552, "programmatic", "herdr tab focus w3:t2: burst of three in one second (FR-6.1)"),
+        ("focus", "tab-focus-tab-focused", 1552, "programmatic", "herdr tab focus w3:t2: burst of three in one second"),
         ("focus", "tab-focus-pane-focused", 1553, "programmatic", "Same burst: pane.focused for the tab's focused pane"),
         ("focus", "tab-focus-workspace-focused", 1554, "programmatic", "Same burst: workspace.focused fires even within one workspace; no pane_id"),
         ("focus", "tab-focus-back-pane-focused", 1606, "programmatic", "herdr tab focus w3:t1: second burst, different event order"),
     ],
     "events-2026-09-20-socket-focus.log": [
-        ("focus", "socket-pane-focus-pane-focused", 4, "programmatic", "socket pane.focus (the call FR-5.1 makes) emits pane.focused, so FR-6.1's dismiss trigger fires"),
+        ("focus", "socket-pane-focus-pane-focused", 4, "programmatic", "Socket pane.focus, the call a click makes, emits pane.focused for the pane"),
         ("focus", "socket-pane-focus-tab-focused", 2, "programmatic", "Same burst: tab.focused, even though the tab did not change"),
         ("focus", "socket-pane-focus-workspace-focused", 3, "programmatic", "Same burst: workspace.focused, even though the workspace did not change"),
     ],

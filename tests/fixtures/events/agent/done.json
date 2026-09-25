@@ -4,7 +4,7 @@
   "captured_at": "17:41:51",
   "provenance": "manual",
   "mark": null,
-  "why": "Claude finished while the user was away: the unwatched completion (FR-1.1, FR-1.4)",
+  "why": "Claude finished while the user was away: the unwatched completion",
   "event": "pane.agent_status_changed",
   "event_json": "{\"event\":\"pane_agent_status_changed\",\"data\":{\"type\":\"pane_agent_status_changed\",\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"agent_status\":\"done\",\"agent\":\"claude\"}}",
   "env": {

@@ -4,7 +4,7 @@
   "captured_at": "19:55:43",
   "provenance": "manual",
   "mark": null,
-  "why": "Claude detected in a pane a shell reporter used earlier (FR-2.4, FR-6.4)",
+  "why": "Claude detected in a pane a shell reporter used earlier",
   "event": "pane.agent_detected",
   "event_json": "{\"event\":\"pane_agent_detected\",\"data\":{\"type\":\"pane_agent_detected\",\"pane_id\":\"w1:p2\",\"workspace_id\":\"w1\",\"agent\":\"claude\"}}",
   "env": {
