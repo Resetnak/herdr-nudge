@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::herdr;
 use crate::notifier;
 use crate::process::Runner;
+use crate::shell_hook::{Zshrc, read_zshrc, shown_path, zsh_block, zshrc_loads};
 use crate::state::{self, Loaded, StateDir};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,7 +313,7 @@ fn check_zsh(report: &mut Report, inputs: &Inputs) {
         );
     }
 
-    let rc = fs::read_to_string(&inputs.zshrc).unwrap_or_default();
+    let rc = read_zshrc(&inputs.zshrc).unwrap_or_default();
     let shown = shown_path(&hook, &inputs.home);
     let rc_name = shown_path(&inputs.zshrc, &inputs.home);
     match zshrc_loads(&rc, &hook, &inputs.home) {
@@ -329,75 +330,10 @@ fn check_zsh(report: &mut Report, inputs: &Inputs) {
             Level::Note,
             format!(
                 "{rc_name} doesn't load the zsh hook. If you load it some other way, ignore\n\
-                 this. Otherwise, to get a notification when a long command finishes, add\n\
-                 this to {rc_name} and open a new shell:\n\n{}",
+                 this. Otherwise, to get a notification when a long command finishes, run\n\
+                 `herdr-nudge setup-zsh`, or add this to {rc_name} and open a new shell:\n\n{}",
                 zsh_block(&shown)
             ),
         ),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Zshrc {
-    Loads,
-    CommentedOut,
-    OtherPath,
-    Missing,
-}
-
-/// Whether `.zshrc`'s text names the hook, spelled as a path, from `~`, or
-/// from `$HOME` / `${HOME}`. Only reads the file: a hook loaded from
-/// somewhere else, like oh-my-zsh's custom folder, reads as `Missing`.
-pub fn zshrc_loads(rc: &str, hook: &Path, home: &Path) -> Zshrc {
-    let mut names = vec![hook.display().to_string()];
-    if let Ok(rest) = hook.strip_prefix(home) {
-        let rest = rest.display();
-        names.extend([
-            format!("~/{rest}"),
-            format!("$HOME/{rest}"),
-            format!("${{HOME}}/{rest}"),
-        ]);
-    }
-    let names_hook = |line: &str| names.iter().any(|n| line.contains(n.as_str()));
-    let (comments, code): (Vec<&str>, Vec<&str>) = rc
-        .lines()
-        .map(str::trim_start)
-        .partition(|line| line.starts_with('#'));
-    if code.iter().any(|l| names_hook(l)) {
-        Zshrc::Loads
-    } else if comments.iter().any(|l| names_hook(l)) {
-        Zshrc::CommentedOut
-    } else if code.iter().any(|l| l.contains("herdr-nudge.zsh")) {
-        Zshrc::OtherPath
-    } else {
-        Zshrc::Missing
-    }
-}
-
-/// The lines for `.zshrc`. An `if` rather than `[[ -r … ]] && source …`,
-/// which leaves `$?` at 1 when the file is missing, and oh-my-zsh themes
-/// show the first prompt as a failed command.
-pub fn zsh_block(path: &str) -> String {
-    format!("if [[ -r {path} ]]; then\n  source {path}\nfi")
-}
-
-/// `~/…` when under home and plain enough for zsh to take unquoted, the
-/// full path single-quoted otherwise.
-pub fn shown_path(path: &Path, home: &Path) -> String {
-    let plain = |s: &str| {
-        s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
-    };
-    let full = path.display().to_string();
-    if let Ok(rest) = path.strip_prefix(home) {
-        let rest = rest.display().to_string();
-        if plain(&rest) {
-            return format!("~/{rest}");
-        }
-    }
-    if plain(&full) {
-        full
-    } else {
-        format!("'{}'", full.replace('\'', r"'\''"))
     }
 }

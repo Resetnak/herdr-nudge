@@ -1,4 +1,5 @@
-//! Puts the zsh hook where `~/.zshrc` can source it.
+//! Puts the zsh hook where `~/.zshrc` can source it, and knows the lines
+//! that do the sourcing.
 //!
 //! The hook is compiled into the binary, so the copy in the state directory
 //! always matches the plugin that wrote it, and nothing has to find the
@@ -7,6 +8,8 @@
 //! change reaches new shells after a restart.
 
 use std::collections::BTreeSet;
+use std::fs;
+use std::io;
 use std::path::Path;
 
 use crate::config::{self, Config};
@@ -94,4 +97,79 @@ pub fn install<R: Runner>(
         Err(e) => notes.push(format!("could not write the zsh hook: {e}")),
     }
     notes
+}
+
+/// `.zshrc`'s text, or nothing if there's no file. A byte that isn't UTF-8
+/// (a Latin-1 comment, say) is replaced rather than failing the whole read.
+pub fn read_zshrc(path: &Path) -> io::Result<String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zshrc {
+    Loads,
+    CommentedOut,
+    OtherPath,
+    Missing,
+}
+
+/// Whether `.zshrc`'s text names the hook, spelled as a path, from `~`, or
+/// from `$HOME` / `${HOME}`. Only reads the file: a hook loaded from
+/// somewhere else, like oh-my-zsh's custom folder, reads as `Missing`.
+pub fn zshrc_loads(rc: &str, hook: &Path, home: &Path) -> Zshrc {
+    let mut names = vec![hook.display().to_string()];
+    if let Ok(rest) = hook.strip_prefix(home) {
+        let rest = rest.display();
+        names.extend([
+            format!("~/{rest}"),
+            format!("$HOME/{rest}"),
+            format!("${{HOME}}/{rest}"),
+        ]);
+    }
+    let names_hook = |line: &str| names.iter().any(|n| line.contains(n.as_str()));
+    let (comments, code): (Vec<&str>, Vec<&str>) = rc
+        .lines()
+        .map(str::trim_start)
+        .partition(|line| line.starts_with('#'));
+    if code.iter().any(|l| names_hook(l)) {
+        Zshrc::Loads
+    } else if comments.iter().any(|l| names_hook(l)) {
+        Zshrc::CommentedOut
+    } else if code.iter().any(|l| l.contains("herdr-nudge.zsh")) {
+        Zshrc::OtherPath
+    } else {
+        Zshrc::Missing
+    }
+}
+
+/// The lines for `.zshrc`. An `if` rather than `[[ -r … ]] && source …`,
+/// which leaves `$?` at 1 when the file is missing, and oh-my-zsh themes
+/// show the first prompt as a failed command.
+pub fn zsh_block(path: &str) -> String {
+    format!("if [[ -r {path} ]]; then\n  source {path}\nfi")
+}
+
+/// `~/…` when under home and plain enough for zsh to take unquoted, the
+/// full path single-quoted otherwise.
+pub fn shown_path(path: &Path, home: &Path) -> String {
+    let plain = |s: &str| {
+        s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+    };
+    let full = path.display().to_string();
+    if let Ok(rest) = path.strip_prefix(home) {
+        let rest = rest.display().to_string();
+        if plain(&rest) {
+            return format!("~/{rest}");
+        }
+    }
+    if plain(&full) {
+        full
+    } else {
+        format!("'{}'", full.replace('\'', r"'\''"))
+    }
 }

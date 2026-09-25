@@ -9,7 +9,7 @@ use herdr_nudge::config::{self, Config};
 use herdr_nudge::context::{self, Context, Env};
 use herdr_nudge::process::System;
 use herdr_nudge::state::StateDir;
-use herdr_nudge::{click, doctor, event, event_summary, handler, notifier, shell_hook};
+use herdr_nudge::{click, doctor, event, event_summary, handler, notifier, setup_zsh, shell_hook};
 
 fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
@@ -19,6 +19,7 @@ fn main() -> ExitCode {
         Ok(Mode::ExampleConfig) => run_example_config(),
         Ok(Mode::Test { shell }) => run_test(shell),
         Ok(Mode::Doctor) => run_doctor(),
+        Ok(Mode::SetupZsh) => run_setup_zsh(),
         Ok(Mode::Help) => {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
@@ -296,14 +297,10 @@ fn run_test(shell: bool) -> ExitCode {
     }
 }
 
-/// Run by the user, usually from a pane. The state directory comes from
-/// doctor's own environment, which in a pane is the server's, so it's where
-/// the hooks write. Herdr's config is found the way `herdr` finds it.
+/// Run by the user, usually from a pane, which is what makes
+/// [`home_and_state`] right. Herdr's config is found the way `herdr` finds it.
 fn run_doctor() -> ExitCode {
-    let (Some(home), Some(state)) = (
-        env_path("HOME"),
-        StateDir::locate(|name| std::env::var(name).ok()),
-    ) else {
+    let Some((home, state)) = home_and_state() else {
         eprintln!("herdr-nudge: no HOME");
         return ExitCode::FAILURE;
     };
@@ -321,9 +318,7 @@ fn run_doctor() -> ExitCode {
     let inputs = doctor::Inputs {
         config_dir,
         plugin_root,
-        zshrc: env_path("ZDOTDIR")
-            .unwrap_or_else(|| home.clone())
-            .join(".zshrc"),
+        zshrc: zshrc_path(&home),
         home,
         state,
         shell: env_string("SHELL"),
@@ -336,6 +331,51 @@ fn run_doctor() -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Only when the user runs it. The hook path comes from our own
+/// environment, as for `doctor`, so it's right when run in a Herdr pane. Run
+/// from a shell whose `XDG_STATE_HOME` differs from Herdr's server, the
+/// lines name a file Herdr never writes.
+fn run_setup_zsh() -> ExitCode {
+    let Some((home, state)) = home_and_state() else {
+        eprintln!("herdr-nudge: no HOME");
+        return ExitCode::FAILURE;
+    };
+    let zshrc = zshrc_path(&home);
+    let outcome = setup_zsh::run(
+        &zshrc,
+        &state.shell_hook_path(),
+        &home,
+        &mut std::io::stdin().lock(),
+        &mut std::io::stdout(),
+    );
+    match outcome {
+        // The hook stays off, and it's the one case the user has to sort
+        // out by hand.
+        Ok(setup_zsh::Outcome::CommentedOut) => ExitCode::FAILURE,
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("herdr-nudge: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `HOME`, and the state directory as our own environment finds it. In a
+/// pane that environment is the server's, `XDG_STATE_HOME` included, so
+/// it's where the hooks write.
+fn home_and_state() -> Option<(PathBuf, StateDir)> {
+    let home = env_path("HOME")?;
+    let state = StateDir::locate(|name| std::env::var(name).ok())?;
+    Some((home, state))
+}
+
+/// The `.zshrc` zsh reads: under `ZDOTDIR` when it's set and exported.
+fn zshrc_path(home: &Path) -> PathBuf {
+    env_path("ZDOTDIR")
+        .unwrap_or_else(|| home.to_path_buf())
+        .join(".zshrc")
 }
 
 /// A config we can't parse falls back to defaults rather than going quiet.

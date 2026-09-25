@@ -16,6 +16,7 @@ pub enum Mode {
     Doctor,
     /// Writes a commented `config.toml`, or prints it if there is one.
     ExampleConfig,
+    SetupZsh,
     Test {
         shell: bool,
     },
@@ -88,6 +89,7 @@ herdr-nudge — macOS notifications for Herdr panes
   herdr-nudge test [--shell]        post a notification for this pane
   herdr-nudge example-config        write config.toml with every setting,
                                     or print it if the file exists
+  herdr-nudge setup-zsh             add the zsh hook to .zshrc, after asking
 ";
 
 /// `args` is argv without the program name.
@@ -121,6 +123,10 @@ where
         "example-config" => {
             no_more(rest, "example-config")?;
             Ok(Mode::ExampleConfig)
+        }
+        "setup-zsh" => {
+            no_more(rest, "setup-zsh")?;
+            Ok(Mode::SetupZsh)
         }
         "test" => {
             let mut shell = false;
