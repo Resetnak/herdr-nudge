@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "ps",
+    "-Eww",
+    "-o",
+    "command=",
+    "-p",
+    "15337"
+  ],
+  "captured_at": "2026-09-24T20:15:42",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "/Users/dev/.local/bin/herdr server HOME=/Users/dev USER=dev PATH=/usr/bin:/bin:/usr/sbin:/sbin:/Users/dev/.local/bin XDG_STATE_HOME=/private/tmp/claude-501/-Users-dev-Developer-herdr-nudge/00000000-0000-4000-8000-000000000004/scratchpad/xdg-state HERDR_SESSION=nudgexdg\n",
+  "stderr": ""
+}

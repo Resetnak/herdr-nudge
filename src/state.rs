@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 use crate::classify::PaneKind;
 use crate::cli::JobId;
 use crate::event::AgentStatus;
+use crate::process::Runner;
+use crate::terminal;
 
 /// Bumped when a file's shape changes. A file with any other version is
 /// moved aside like a corrupt one.
@@ -283,7 +285,7 @@ pub fn new_job_id(now_ms: u64, pid: u32) -> JobId {
 }
 
 /// The state directory and the files in it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateDir {
     pub root: PathBuf,
 }
@@ -295,8 +297,9 @@ pub struct StateDir {
 /// `~/.local/state/herdr/plugins/<plugin id>` (see the captured environment
 /// in any `tests/fixtures/events/` file). `XDG_STATE_HOME` is tried first,
 /// because Herdr 0.9.1 honours it: `herdr plugin config-dir` run with it set
-/// creates `$XDG_STATE_HOME/herdr/plugins/<plugin id>`. A click, run with a
-/// bare environment, won't have it even when the server does.
+/// creates `$XDG_STATE_HOME/herdr/plugins/<plugin id>`, and so does a
+/// server started with it set. A click, run with a bare environment, won't
+/// have it even when the server does; [`server_state_dirs`] covers that.
 pub const PLUGIN_ID: &str = "herdr-nudge";
 
 impl StateDir {
@@ -306,9 +309,8 @@ impl StateDir {
 
     /// `HERDR_PLUGIN_STATE_DIR` when we have it, the guessed path otherwise.
     ///
-    /// If the guess is wrong, notifications still post but every click is a
-    /// silent no-op, because the job file is somewhere this process won't
-    /// look. `doctor` should compare the two and say so.
+    /// For a click the guess misses a server's `XDG_STATE_HOME`, so the
+    /// click asks the servers when the job isn't here.
     pub fn locate(lookup: impl Fn(&str) -> Option<String>) -> Option<StateDir> {
         if let Some(dir) = lookup("HERDR_PLUGIN_STATE_DIR").filter(|d| !d.is_empty()) {
             return Some(StateDir::new(dir));
@@ -388,4 +390,79 @@ impl StateDir {
     pub fn save_agents_cache(&self, cache: &AgentsCache) -> io::Result<()> {
         write_json(&self.agents_cache_path(), cache)
     }
+}
+
+/// The folders macOS asks permission for, under the user's home. A click
+/// that read from one would put up that prompt under the Herdr Nudge name.
+pub const PROTECTED_FOLDERS: [&str; 3] = ["Documents", "Downloads", "Desktop"];
+
+///
+/// Compared without regard to case, as the Mac's disk usually is, and a
+/// path with `..` in it counts as protected rather than being worked out.
+/// A symlink into one of them isn't caught: seeing it means touching the
+/// path, which is what this exists to avoid.
+pub fn in_protected_folder(path: &Path, home: &Path) -> bool {
+    use std::path::Component;
+    if path.components().any(|c| c == Component::ParentDir) {
+        return true;
+    }
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let path = lower(path);
+    PROTECTED_FOLDERS
+        .iter()
+        .any(|folder| path.starts_with(lower(&home.join(folder))))
+}
+
+/// Where a running Herdr server puts our state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerStateDir {
+    pub pid: u32,
+    pub dir: StateDir,
+    /// In one of [`PROTECTED_FOLDERS`], so a click won't look there.
+    pub protected: bool,
+}
+
+/// The state directory each running Herdr server gives its hooks, worked out
+/// from the server's own environment the way [`StateDir::locate`] does.
+///
+/// For the click, which runs with a bare environment and so misses a
+/// server's `XDG_STATE_HOME`. `ps` reads another process's environment
+/// without any permission, as long as it's the same user's.
+///
+/// `home` is the caller's own `HOME`. A directory counts as protected under
+/// it or under the server's, since a server can be started with neither
+/// or with a different one.
+pub fn server_state_dirs(
+    runner: &impl Runner,
+    home: Option<&Path>,
+    notes: &mut Vec<String>,
+) -> Vec<ServerStateDir> {
+    let mut found = Vec::new();
+    for (pid, args) in terminal::herdr_processes(runner, notes) {
+        if !terminal::is_server(&args) {
+            continue;
+        }
+        let Some(env) = terminal::process_env(runner, pid, args.len()) else {
+            notes.push(format!("could not read herdr server {pid}'s environment"));
+            continue;
+        };
+        let lookup = |name: &str| match name {
+            "XDG_STATE_HOME" | "HOME" => env.get(name).cloned(),
+            _ => None,
+        };
+        let Some(dir) = StateDir::locate(lookup) else {
+            continue;
+        };
+        let server_home = env.get("HOME").map(Path::new);
+        let protected = [home, server_home]
+            .into_iter()
+            .flatten()
+            .any(|home| in_protected_folder(&dir.root, home));
+        found.push(ServerStateDir {
+            pid,
+            dir,
+            protected,
+        });
+    }
+    found
 }

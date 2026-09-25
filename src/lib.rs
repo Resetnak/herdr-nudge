@@ -8,7 +8,7 @@
 //! [`content`] writes the three lines of a banner and [`notifier`] posts it.
 //! [`handler`] is what happens on an event, and [`click`] what happens when
 //! the notification is clicked. [`shell_hook`] installs the zsh hook that
-//! reports long shell commands.
+//! reports long shell commands. [`doctor`] checks the setup.
 
 pub mod classify;
 pub mod cli;
@@ -16,6 +16,7 @@ pub mod click;
 pub mod config;
 pub mod content;
 pub mod context;
+pub mod doctor;
 pub mod event;
 pub mod handler;
 pub mod herdr;

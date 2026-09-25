@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "terminal-notifier",
+    "-diagnose"
+  ],
+  "captured_at": "2026-09-24T20:16:42",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "terminal-notifier 3.1.0\n  bundle id           io.github.dev.herdr-nudge\n  bundle path         /Users/dev/Developer/herdr-nudge/vendor/HerdrNudge.app\n  macOS               Version 26.6.2 (Build 25G83)\n  NotificationCenter  running\n\n  authorization       authorized\n  alerts              enabled\n  alert style         banners\n  sounds              enabled\n  notification centre enabled\n  lock screen         enabled\n  previews            when unlocked\n  critical alerts     not supported\n  time sensitive      not supported\n  scheduled delivery  not supported\n\nNo problems found.\n",
+  "stderr": ""
+}

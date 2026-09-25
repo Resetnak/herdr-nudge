@@ -14,7 +14,7 @@
 //! The parent-process chain is no help either: iTerm runs its shells under an
 //! `iTermServer` daemon, not under the app.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::config::Config;
@@ -146,25 +146,7 @@ pub fn attached_clients(
     socket_path: &Path,
     notes: &mut Vec<String>,
 ) -> Vec<Client> {
-    // `-a`: a hook runs under the server, which runs under the client that
-    // started it, and pgrep leaves out its own ancestors unless told not to.
-    let listed = match runner.run(Path::new(PGREP), &["-a", "-lf", HERDR_PATTERN]) {
-        // 1 is "nothing matched".
-        Ok(out) if out.success() || out.code == Some(1) => out.stdout,
-        Ok(out) => {
-            notes.push(format!(
-                "pgrep exited {:?}: {}",
-                out.code,
-                out.stderr.trim()
-            ));
-            return Vec::new();
-        }
-        Err(e) => {
-            notes.push(format!("pgrep: {e}"));
-            return Vec::new();
-        }
-    };
-    let listed = parse_pgrep(&listed);
+    let listed = herdr_processes(runner, notes);
     let candidates: Vec<u32> = listed
         .iter()
         .filter(|(_, args)| is_client(args))
@@ -175,7 +157,7 @@ pub fn attached_clients(
     }
     let servers = listed
         .iter()
-        .filter(|(_, args)| args.get(1).is_some_and(|a| a == "server"))
+        .filter(|(_, args)| is_server(args))
         .map(|(pid, _)| *pid);
     let ours = attached_to(runner, socket_path, servers, &candidates, notes);
     if ours.is_empty() {
@@ -335,6 +317,69 @@ fn join_pids(pids: &[u32]) -> String {
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+/// Every running `herdr` process with its command line, servers and clients
+/// of every session. Empty, with a note, if `pgrep` fails.
+pub fn herdr_processes(runner: &impl Runner, notes: &mut Vec<String>) -> Vec<(u32, Vec<String>)> {
+    // `-a`: a hook runs under the server, which runs under the client that
+    // started it, and pgrep leaves out its own ancestors unless told not to.
+    match runner.run(Path::new(PGREP), &["-a", "-lf", HERDR_PATTERN]) {
+        // 1 is "nothing matched".
+        Ok(out) if out.success() || out.code == Some(1) => parse_pgrep(&out.stdout),
+        Ok(out) => {
+            notes.push(format!(
+                "pgrep exited {:?}: {}",
+                out.code,
+                out.stderr.trim()
+            ));
+            Vec::new()
+        }
+        Err(e) => {
+            notes.push(format!("pgrep: {e}"));
+            Vec::new()
+        }
+    }
+}
+
+/// `herdr server`, whatever session it serves: a named session's server
+/// has the name only in its environment. `herdr server stop` and the other
+/// subcommands are short-lived CLI calls, not servers; our own startup hook
+/// runs `herdr server agent-manifests`.
+pub fn is_server(args: &[String]) -> bool {
+    args.len() == 2 && args[1] == "server"
+}
+
+/// One process's environment, from `ps -Eww -o command=`, which prints the
+/// command line and then the environment, space-separated. `arg_words` is
+/// how many words the command line has, as `pgrep` printed it; the variables
+/// are read only after those. A value with a space in it comes back cut at
+/// the space, and the rest of it can look like another variable, so the
+/// first of each name wins: the real one comes before anything a later
+/// value could contain. `None` if `ps` fails, most often because the
+/// process has gone.
+pub fn process_env(
+    runner: &impl Runner,
+    pid: u32,
+    arg_words: usize,
+) -> Option<BTreeMap<String, String>> {
+    let out = runner
+        .run(
+            Path::new(PS),
+            &["-Eww", "-o", "command=", "-p", &pid.to_string()],
+        )
+        .ok()
+        .filter(|out| out.success())?;
+    let mut env = BTreeMap::new();
+    for (k, v) in out
+        .stdout
+        .split_whitespace()
+        .skip(arg_words)
+        .filter_map(|w| w.split_once('='))
+    {
+        env.entry(k.to_owned()).or_insert_with(|| v.to_owned());
+    }
+    Some(env)
 }
 
 /// `pgrep -lf` lines: a pid, a space, the command line.

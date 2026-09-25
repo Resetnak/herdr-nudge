@@ -15,7 +15,7 @@ use std::path::Path;
 use herdr_nudge::config::Config;
 use herdr_nudge::terminal::{
     Client, Resolution, TerminalSource, asns, attached_clients, detect, frontmost_bundle_id,
-    is_client, parse_bundle_id, parse_lsof, parse_pgrep, parse_ps, pick, resolve,
+    is_client, is_server, parse_bundle_id, parse_lsof, parse_pgrep, parse_ps, pick, resolve,
 };
 use support::{Recorded, Replay};
 
@@ -451,4 +451,14 @@ fn a_front_reply_that_is_not_an_asn_asks_nothing_more() {
     let replay = Replay::new([front]);
     assert_eq!(frontmost_bundle_id(&replay), None);
     assert_eq!(replay.call_count(), 1);
+}
+
+/// Our own startup hook runs `herdr server agent-manifests`, and a click can
+/// land while it does.
+#[test]
+fn only_a_bare_herdr_server_is_a_server() {
+    assert!(is_server(&args("/Users/dev/.local/bin/herdr server")));
+    assert!(!is_server(&args("herdr server agent-manifests --json")));
+    assert!(!is_server(&args("herdr server stop")));
+    assert!(!is_server(&args("herdr")));
 }

@@ -170,6 +170,13 @@ belong to the probe; tests should override them.
 | `sys/lsappinfo-visible-process-list` | – | visible apps, most recently used first: Ghostty, then Chrome, then iTerm |
 | `sys/lsappinfo-find-{ghostty,iterm}` | – | a running app's ASN, by bundle id |
 | `sys/lsappinfo-find-not-running` | – | an app that isn't running: exit 0, no output |
+| `sys/pgrep-herdr-three-servers` | – | 0.9.1: the default session's server (85985) and client (85984), plus two throwaway sessions' servers, `nudgexdg` (15337) and `nudgeplain` (16451), with no clients |
+| `sys/ps-env-server-xdg` | – | the `nudgexdg` server's environment, started with `XDG_STATE_HOME` set. Its hooks' state went under that directory, not `~/.local/state` |
+| `sys/ps-env-server-plain` | – | the `nudgeplain` server's, started without it |
+| `sys/pgrep-herdr-documents-servers` | – | 0.9.1: the default session's server and client, plus `nudgedocs` (24641) and `nudgenohome` (24642) |
+| `sys/ps-env-server-documents` | – | `nudgedocs`: `HOME=/tmp/hnd/a`, `XDG_STATE_HOME` in that home's `Documents` |
+| `sys/ps-env-server-no-home` | – | `nudgenohome`: no `HOME` at all, `XDG_STATE_HOME=/tmp/hnd/b/Documents/state` |
+| `sys/terminal-notifier-diagnose` | – | our bundle's `-diagnose` with notifications allowed and alert style Banners |
 
 The `nudge-capture` session was made for these captures and deleted
 afterwards. Its server and clients were started from a pty with only
@@ -180,6 +187,13 @@ So the terminals in them are the right values for those apps, but the
 clients did not really run inside the apps. The default session's
 clients have real environments, which is why no `ps -E` capture includes
 them.
+
+The `nudgexdg` and `nudgeplain` servers were started headless (`herdr
+server` with `HERDR_SESSION` set) under `env -i` with only `HOME`, `USER`,
+`PATH` and, for `nudgexdg`, `XDG_STATE_HOME`, for the same reason. Both
+sessions were deleted afterwards. `nudgedocs` and `nudgenohome` were
+started the same way, with fake homes under `/tmp/hnd` so no real
+`~/Documents` was touched, and killed after the capture.
 
 ## Findings (2026-09-18 captures)
 

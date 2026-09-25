@@ -9,7 +9,7 @@ use herdr_nudge::config::{self, Config};
 use herdr_nudge::context::{self, Context, Env};
 use herdr_nudge::process::System;
 use herdr_nudge::state::StateDir;
-use herdr_nudge::{click, event, event_summary, handler, notifier, shell_hook};
+use herdr_nudge::{click, doctor, event, event_summary, handler, notifier, shell_hook};
 
 fn main() -> ExitCode {
     match cli::parse(std::env::args().skip(1)) {
@@ -18,6 +18,7 @@ fn main() -> ExitCode {
         Ok(Mode::Cleanup) => run_cleanup(),
         Ok(Mode::ExampleConfig) => run_example_config(),
         Ok(Mode::Test { shell }) => run_test(shell),
+        Ok(Mode::Doctor) => run_doctor(),
         Ok(Mode::Help) => {
             print!("{}", cli::USAGE);
             ExitCode::SUCCESS
@@ -25,10 +26,6 @@ fn main() -> ExitCode {
         Ok(Mode::Version) => {
             println!("herdr-nudge {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
-        }
-        Ok(other) => {
-            eprintln!("herdr-nudge: {} is not implemented yet", mode_name(&other));
-            ExitCode::FAILURE
         }
         Err(err) => {
             eprintln!("herdr-nudge: {err}");
@@ -167,7 +164,15 @@ fn run_click(id: &cli::JobId) -> ExitCode {
     };
 
     let system = System::default();
-    let (outcome, notes) = click::run(&state, &system, &system, id, herdr_nudge::state::now_ms());
+    let home = env_path("HOME");
+    let (outcome, notes) = click::run(
+        &state,
+        home.as_deref(),
+        &system,
+        &system,
+        id,
+        herdr_nudge::state::now_ms(),
+    );
     for note in notes {
         eprintln!("herdr-nudge: {note}");
     }
@@ -291,6 +296,48 @@ fn run_test(shell: bool) -> ExitCode {
     }
 }
 
+/// Run by the user, usually from a pane. The state directory comes from
+/// doctor's own environment, which in a pane is the server's, so it's where
+/// the hooks write. Herdr's config is found the way `herdr` finds it.
+fn run_doctor() -> ExitCode {
+    let (Some(home), Some(state)) = (
+        env_path("HOME"),
+        StateDir::locate(|name| std::env::var(name).ok()),
+    ) else {
+        eprintln!("herdr-nudge: no HOME");
+        return ExitCode::FAILURE;
+    };
+    let system = System::default();
+    let config_dir = config::locate_dir(env_path("HERDR_PLUGIN_CONFIG_DIR"), &herdr_bin(), &system)
+        .map_err(|e| e.to_string());
+    let plugin_root = env_path("HERDR_PLUGIN_ROOT")
+        .or_else(|| own_path().and_then(|p| context::plugin_root_above(&p)));
+    // The order `herdr config check` reads them in (checked on 0.9.1).
+    let herdr_config = env_path("HERDR_CONFIG_PATH").unwrap_or_else(|| {
+        env_path("XDG_CONFIG_HOME")
+            .unwrap_or_else(|| home.join(".config"))
+            .join("herdr/config.toml")
+    });
+    let inputs = doctor::Inputs {
+        config_dir,
+        plugin_root,
+        zshrc: env_path("ZDOTDIR")
+            .unwrap_or_else(|| home.clone())
+            .join(".zshrc"),
+        home,
+        state,
+        shell: env_string("SHELL"),
+        herdr_config,
+    };
+    let report = doctor::run(&inputs, &system);
+    print!("{}", report.render());
+    if report.count(doctor::Level::Fail) > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 /// A config we can't parse falls back to defaults rather than going quiet.
 /// One typo must not be able to stop notifications, and defaults announce
 /// themselves. The cost is that the whole file reverts, so `enabled =
@@ -325,17 +372,4 @@ fn herdr_bin() -> PathBuf {
 fn own_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     Some(exe.canonicalize().unwrap_or(exe))
-}
-
-fn mode_name(mode: &Mode) -> &'static str {
-    match mode {
-        Mode::Event => "event mode",
-        Mode::Click(_) => "--click",
-        Mode::Cleanup => "--cleanup",
-        Mode::Doctor => "doctor",
-        Mode::ExampleConfig => "example-config",
-        Mode::Test { .. } => "test",
-        Mode::Help => "--help",
-        Mode::Version => "--version",
-    }
 }

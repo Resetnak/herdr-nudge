@@ -9,7 +9,8 @@
 //! It must also stay out of `~/Documents`, `~/Downloads` and `~/Desktop`.
 //! Anything it reads there would put up a permission prompt under the Herdr
 //! Nudge name, which the user has no way to connect to what they just
-//! clicked. It touches the state directory and nothing else.
+//! clicked. It reads only state directories, and skips one a Herdr server
+//! has put in any of those folders.
 //!
 //! `pgrep`, `ps`, `lsof` and `lsappinfo`, which find the terminal again, work
 //! under that bare environment too (checked by hand on macOS 26).
@@ -25,7 +26,7 @@ use crate::cli::JobId;
 use crate::herdr;
 use crate::notifier::Notifier;
 use crate::process::{Runner, Spawner};
-use crate::state::{Job, Loaded, StateDir};
+use crate::state::{self, Job, Loaded, ServerStateDir, StateDir};
 use crate::terminal;
 
 const OPEN: &str = "/usr/bin/open";
@@ -50,57 +51,147 @@ pub enum Outcome {
     },
 }
 
+/// `home` is the click's `HOME`, which the other state directories are
+/// checked against before one is read.
 pub fn run<R: Runner, S: Spawner>(
     state: &StateDir,
+    home: Option<&Path>,
+    runner: &R,
+    spawner: &S,
+    id: &JobId,
+    now_ms: u64,
+) -> (Outcome, Vec<String>) {
+    run_with(
+        state,
+        |notes| state::server_state_dirs(runner, home, notes),
+        runner,
+        spawner,
+        id,
+        now_ms,
+    )
+}
+
+/// [`run`], with the other places to look for the job passed in:
+/// `elsewhere` is only called when the job isn't in `state`.
+///
+/// `state` is where the job usually is. A Herdr server started with
+/// `XDG_STATE_HOME` set puts it under that instead, and the click's bare
+/// environment doesn't have the variable, so then the servers are asked.
+pub fn run_with<R: Runner, S: Spawner>(
+    state: &StateDir,
+    elsewhere: impl FnOnce(&mut Vec<String>) -> Vec<ServerStateDir>,
     runner: &R,
     spawner: &S,
     id: &JobId,
     now_ms: u64,
 ) -> (Outcome, Vec<String>) {
     let mut notes = Vec::new();
+    let outcome = match find_job(state, elsewhere, id, &mut notes) {
+        Some((dir, job)) => act(&dir, runner, spawner, job, now_ms, &mut notes),
+        None => Outcome::NoJob,
+    };
+    (outcome, notes)
+}
 
-    let job = match state.job(id) {
-        Ok(Loaded::Found(job)) => job,
-        Ok(Loaded::Missing) => return (Outcome::NoJob, notes),
+fn find_job(
+    state: &StateDir,
+    elsewhere: impl FnOnce(&mut Vec<String>) -> Vec<ServerStateDir>,
+    id: &JobId,
+    notes: &mut Vec<String>,
+) -> Option<(StateDir, Job)> {
+    match load(state, id, notes) {
+        Found::Job(job) => return Some((state.clone(), *job)),
+        Found::Unusable => return None,
+        Found::Missing => {}
+    }
+    for server in elsewhere(notes) {
+        if server.dir == *state {
+            continue;
+        }
+        if server.protected {
+            notes.push(format!(
+                "not looking in {}, herdr server {}'s state directory: it's in a folder macOS guards",
+                server.dir.root.display(),
+                server.pid
+            ));
+            continue;
+        }
+        match load(&server.dir, id, notes) {
+            Found::Job(job) => {
+                notes.push(format!(
+                    "job found in {}, herdr server {}'s state directory",
+                    server.dir.root.display(),
+                    server.pid
+                ));
+                return Some((server.dir, *job));
+            }
+            Found::Unusable => return None,
+            Found::Missing => {}
+        }
+    }
+    None
+}
+
+enum Found {
+    Job(Box<Job>),
+    Missing,
+    /// There, but unreadable. Not looked for anywhere else, since it can't
+    /// be anywhere else too.
+    Unusable,
+}
+
+fn load(state: &StateDir, id: &JobId, notes: &mut Vec<String>) -> Found {
+    match state.job(id) {
+        Ok(Loaded::Found(job)) => Found::Job(Box::new(job)),
+        Ok(Loaded::Missing) => Found::Missing,
         Ok(Loaded::Recovered(r)) => {
             notes.push(format!("job {id} was unreadable ({}), ignored", r.reason));
-            return (Outcome::NoJob, notes);
+            Found::Unusable
         }
         Err(e) => {
             notes.push(format!("job {id}: {e}"));
-            return (Outcome::NoJob, notes);
+            Found::Unusable
         }
-    };
+    }
+}
 
+fn act<R: Runner, S: Spawner>(
+    state: &StateDir,
+    runner: &R,
+    spawner: &S,
+    job: Job,
+    now_ms: u64,
+    notes: &mut Vec<String>,
+) -> Outcome {
     if job.is_expired(now_ms) {
-        clear(state, spawner, &job, &mut notes);
-        return (Outcome::Expired, notes);
+        clear(state, spawner, &job, notes);
+        return Outcome::Expired;
     }
 
     // Cleared before focusing, not after, so a focus that fails still leaves
     // nothing behind. The banner is gone either way, so there is nothing to
     // retry from. It also means the `pane.focused` our own focus causes
     // finds no job to withdraw.
-    clear(state, spawner, &job, &mut notes);
+    clear(state, spawner, &job, notes);
 
     // Looked for again because the notification can be an hour old, and the
     // user may have moved to another terminal since. Frontmost right now is
     // Notification Center or our own app, and neither shows a Herdr client,
     // so neither can come out of this.
     let detected = if job.detect_at_click {
-        terminal::detect(runner, &job.socket_path, &mut notes).1
+        terminal::detect(runner, &job.socket_path, notes).1
     } else {
         None
     };
     let bundle_id = detected.or(job.bundle_id);
-    raise_terminal(runner, bundle_id.as_deref(), &mut notes);
+    raise_terminal(runner, bundle_id.as_deref(), notes);
 
     let pane_id = job.pane_id;
     match herdr::focus_pane(&job.socket_path, &pane_id, FOCUS_TIMEOUT) {
-        Ok(()) => (Outcome::Focused { pane_id }, notes),
+        Ok(()) => Outcome::Focused { pane_id },
         Err(e) => {
             notes.push(format!("could not focus {pane_id}: {e}"));
-            (Outcome::NotFocused { pane_id }, notes)
+            Outcome::NotFocused { pane_id }
         }
     }
 }

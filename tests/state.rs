@@ -9,8 +9,11 @@ use std::path::Path;
 use herdr_nudge::classify::PaneKind;
 use herdr_nudge::cli::JobId;
 use herdr_nudge::event::AgentStatus;
-use herdr_nudge::state::{AgentsCache, Job, Loaded, StateDir, VERSION, write_atomic};
-use support::scratch_dir;
+use herdr_nudge::state::{
+    AgentsCache, Job, Loaded, StateDir, VERSION, in_protected_folder, server_state_dirs,
+    write_atomic,
+};
+use support::{Recorded, Replay, scratch_dir};
 
 fn leftovers(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
@@ -327,4 +330,106 @@ fn job(id: &JobId) -> Job {
         created_at_ms: 1_000,
         expires_at_ms: 9_000,
     }
+}
+
+/// Three servers: `nudgexdg` started with `XDG_STATE_HOME`, `nudgeplain`
+/// without, and the default session's, whose environment wasn't captured
+/// (it's the user's whole environment), so `ps` on it has no recording.
+#[test]
+fn each_server_state_directory_comes_from_its_own_environment() {
+    let runner = Replay::new([
+        Recorded::sys("pgrep-herdr-three-servers"),
+        Recorded::sys("ps-env-server-xdg"),
+        Recorded::sys("ps-env-server-plain"),
+    ]);
+    let mut notes = Vec::new();
+    let dirs = server_state_dirs(&runner, None, &mut notes);
+
+    let found: Vec<(u32, String, bool)> = dirs
+        .iter()
+        .map(|d| (d.pid, d.dir.root.display().to_string(), d.protected))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                15337,
+                "/private/tmp/claude-501/-Users-dev-Developer-herdr-nudge/00000000-0000-4000-8000-000000000004/scratchpad/xdg-state/herdr/plugins/herdr-nudge".to_owned(),
+                false
+            ),
+            (
+                16451,
+                "/Users/dev/.local/state/herdr/plugins/herdr-nudge".to_owned(),
+                false
+            ),
+        ],
+        "sys/ps-env-server-xdg and sys/ps-env-server-plain"
+    );
+    assert_eq!(
+        notes,
+        vec!["could not read herdr server 85985's environment".to_owned()]
+    );
+}
+
+#[test]
+fn protected_folders_are_matched_by_whole_path_components() {
+    let home = Path::new("/Users/dev");
+    assert!(in_protected_folder(
+        Path::new("/Users/dev/Documents/state"),
+        home
+    ));
+    assert!(in_protected_folder(Path::new("/Users/dev/Desktop"), home));
+    assert!(!in_protected_folder(
+        Path::new("/Users/dev/Documents-old/state"),
+        home
+    ));
+    assert!(!in_protected_folder(
+        Path::new("/Users/dev/.local/state"),
+        home
+    ));
+}
+
+#[test]
+fn protected_folders_ignore_case_and_refuse_dot_dot() {
+    let home = Path::new("/Users/dev");
+    assert!(in_protected_folder(
+        Path::new("/Users/dev/documents/state"),
+        home
+    ));
+    assert!(in_protected_folder(Path::new("/users/DEV/DOWNLOADS"), home));
+    assert!(in_protected_folder(
+        Path::new("/Users/dev/x/../Documents"),
+        home
+    ));
+}
+
+/// `nudgedocs` was started with `HOME=/tmp/hnd/a` and its state in that
+/// home's Documents; `nudgenohome` with no `HOME` at all and its state in
+/// `/tmp/hnd/b/Documents`. Neither is the user's real home.
+#[test]
+fn a_server_state_directory_in_documents_is_protected_by_either_home() {
+    let runner = || {
+        Replay::new([
+            Recorded::sys("pgrep-herdr-documents-servers"),
+            Recorded::sys("ps-env-server-documents"),
+            Recorded::sys("ps-env-server-no-home"),
+        ])
+    };
+    let protected = |home: Option<&Path>| -> Vec<(u32, bool)> {
+        server_state_dirs(&runner(), home, &mut Vec::new())
+            .iter()
+            .map(|d| (d.pid, d.protected))
+            .collect()
+    };
+
+    assert_eq!(
+        protected(None),
+        vec![(24641, true), (24642, false)],
+        "only the server's own HOME to go on"
+    );
+    assert_eq!(
+        protected(Some(Path::new("/tmp/hnd/b"))),
+        vec![(24641, true), (24642, true)],
+        "the caller's HOME catches the server that has none"
+    );
 }

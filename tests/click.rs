@@ -13,7 +13,7 @@ use herdr_nudge::cli::JobId;
 use herdr_nudge::click::{self, Outcome};
 use herdr_nudge::event::AgentStatus;
 use herdr_nudge::process::{Output, Runner};
-use herdr_nudge::state::{Job, Loaded, StateDir, VERSION};
+use herdr_nudge::state::{Job, Loaded, ServerStateDir, StateDir, VERSION};
 use support::{Recorded, Replay, SocketExchange, Spy, fake_herdr, scratch_dir};
 
 /// A [`Replay`] that also notes when each call was made, so a test can tell
@@ -84,7 +84,7 @@ fn clicking_with_no_job_does_nothing() {
     let state = state_for("click_no_job");
     let runner = Replay::default();
     let spy = Spy::default();
-    let (outcome, notes) = click::run(&state, &runner, &spy, &job_id(), 2_000);
+    let (outcome, notes) = click::run_with(&state, |_| Vec::new(), &runner, &spy, &job_id(), 2_000);
 
     assert_eq!(outcome, Outcome::NoJob, "no job file");
     assert!(notes.is_empty(), "nothing worth logging: {notes:?}");
@@ -105,7 +105,7 @@ fn clicking_raises_the_terminal_then_focuses_the_pane() {
         .expect("save job");
 
     let runner = Timed::new(opens_ghostty());
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 
     assert_eq!(
         outcome,
@@ -163,7 +163,7 @@ fn a_click_raises_the_terminal_attached_now_not_the_one_posted_from() {
         Recorded::sys("ps-env-capture-session-one-client"),
         Recorded::sys("open-bundle-ghostty"),
     ]);
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::Focused { .. }),
@@ -197,7 +197,7 @@ fn with_no_client_left_the_click_raises_the_job_terminal() {
         .map(|s| s.to_string())
         .collect();
     let runner = Replay::new([none, Recorded::sys("open-bundle-ghostty")]);
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::Focused { .. }),
@@ -224,7 +224,7 @@ fn an_unresolved_terminal_still_focuses_the_pane() {
     state.save_job(&job).expect("save job");
 
     let runner = Replay::default();
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::Focused { .. }),
@@ -244,7 +244,7 @@ fn a_failed_open_still_focuses_the_pane() {
     state.save_job(&job).expect("save job");
 
     let runner = Replay::new([Recorded::sys("open-bundle-unknown")]);
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::Focused { .. }),
@@ -269,7 +269,7 @@ fn a_pane_that_has_gone_is_not_focused_but_the_job_is_cleared() {
         .save_job(&a_job(&id, 9_000, &socket))
         .expect("save job");
 
-    let (outcome, notes) = click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &opens_ghostty(), &Spy::default(), &id, 2_000);
 
     assert_eq!(
         outcome,
@@ -298,7 +298,7 @@ fn no_herdr_socket_is_not_focused() {
         .save_job(&a_job(&id, 9_000, &no_socket("click_no_herdr")))
         .expect("save job");
 
-    let (outcome, notes) = click::run(&state, &opens_ghostty(), &Spy::default(), &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &opens_ghostty(), &Spy::default(), &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::NotFocused { .. }),
@@ -318,7 +318,7 @@ fn clicking_a_live_job_clears_it() {
     state.save_job(&job).expect("save job");
 
     let spy = Spy::default();
-    click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
+    click::run(&state, None, &opens_ghostty(), &spy, &id, 2_000);
 
     assert_eq!(
         Spy::arg_after(&spy.only(), "-remove").as_deref(),
@@ -345,7 +345,7 @@ fn clicking_an_expired_job_clears_it_without_focusing() {
         .expect("save job");
 
     let runner = opens_ghostty();
-    let (outcome, notes) = click::run(&state, &runner, &Spy::default(), &id, 1_500);
+    let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 1_500);
 
     assert_eq!(
         outcome,
@@ -383,7 +383,7 @@ fn a_click_leaves_another_panes_live_job_alone() {
     state.save_job(&other).expect("save other job");
 
     let spy = Spy::default();
-    click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
+    click::run(&state, None, &opens_ghostty(), &spy, &id, 2_000);
 
     assert!(
         matches!(state.job(&other_id), Ok(Loaded::Found(_))),
@@ -456,7 +456,7 @@ fn the_job_is_deleted_even_if_the_notifier_will_not_start() {
         .expect("save job");
 
     let spy = Spy::failing();
-    let (outcome, notes) = click::run(&state, &opens_ghostty(), &spy, &id, 2_000);
+    let (outcome, notes) = click::run(&state, None, &opens_ghostty(), &spy, &id, 2_000);
 
     assert!(
         matches!(outcome, Outcome::Focused { .. }),
@@ -471,4 +471,89 @@ fn the_job_is_deleted_even_if_the_notifier_will_not_start() {
         "the job file should still be deleted"
     );
     server.join().expect("fake socket");
+}
+
+/// A server started with `XDG_STATE_HOME` keeps its jobs under it, and the
+/// click's environment doesn't have the variable.
+#[test]
+fn a_job_in_a_servers_own_state_directory_is_found() {
+    let usual = state_for("click_elsewhere_usual");
+    let theirs = StateDir::new(scratch_dir("click_elsewhere_xdg").join("state"));
+    let id = job_id();
+    theirs
+        .save_job(&a_job(&id, 9_000, &no_socket("click_elsewhere")))
+        .expect("save job");
+    let server = ServerStateDir {
+        pid: 15337,
+        dir: theirs.clone(),
+        protected: false,
+    };
+
+    let spy = Spy::default();
+    let (outcome, notes) =
+        click::run_with(&usual, |_| vec![server], &opens_ghostty(), &spy, &id, 2_000);
+
+    assert!(
+        matches!(outcome, Outcome::NotFocused { .. }),
+        "the job should be found and acted on: {outcome:?} {notes:?}"
+    );
+    assert!(
+        matches!(theirs.job(&id), Ok(Loaded::Missing)),
+        "the job should be deleted where it was found"
+    );
+}
+
+#[test]
+fn a_state_directory_in_documents_is_not_read() {
+    let usual = state_for("click_protected_usual");
+    let theirs = StateDir::new(scratch_dir("click_protected_xdg").join("state"));
+    let id = job_id();
+    theirs
+        .save_job(&a_job(&id, 9_000, &no_socket("click_protected")))
+        .expect("save job");
+    let server = ServerStateDir {
+        pid: 15337,
+        dir: theirs.clone(),
+        protected: true,
+    };
+
+    let spy = Spy::default();
+    let (outcome, notes) = click::run_with(
+        &usual,
+        |_| vec![server],
+        &Replay::default(),
+        &spy,
+        &id,
+        2_000,
+    );
+
+    assert_eq!(outcome, Outcome::NoJob);
+    assert!(
+        notes.iter().any(|n| n.contains("a folder macOS guards")),
+        "notes: {notes:?}"
+    );
+    assert!(
+        matches!(theirs.job(&id), Ok(Loaded::Found(_))),
+        "the job should be left alone"
+    );
+}
+
+/// The servers are only asked when the job isn't where it usually is.
+#[test]
+fn a_job_in_the_usual_place_does_not_ask_the_servers() {
+    let state = state_for("click_usual_first");
+    let id = job_id();
+    state
+        .save_job(&a_job(&id, 9_000, &no_socket("click_usual_first")))
+        .expect("save job");
+
+    let (outcome, _) = click::run_with(
+        &state,
+        |_| panic!("servers asked though the job was found"),
+        &opens_ghostty(),
+        &Spy::default(),
+        &id,
+        2_000,
+    );
+    assert!(matches!(outcome, Outcome::NotFocused { .. }), "{outcome:?}");
 }

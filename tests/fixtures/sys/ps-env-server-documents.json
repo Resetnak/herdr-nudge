@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "ps",
+    "-Eww",
+    "-o",
+    "command=",
+    "-p",
+    "24641"
+  ],
+  "captured_at": "2026-09-24T20:42:39",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "/Users/dev/.local/bin/herdr server HOME=/tmp/hnd/a USER=dev PATH=/usr/bin:/bin:/usr/sbin:/sbin:/Users/dev/.local/bin XDG_STATE_HOME=/tmp/hnd/a/Documents/state HERDR_SESSION=nudgedocs\n",
+  "stderr": ""
+}

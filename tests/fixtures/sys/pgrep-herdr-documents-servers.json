@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "pgrep",
+    "-a",
+    "-lf",
+    "^([^ ]*/)?herdr( |$)"
+  ],
+  "captured_at": "2026-09-24T20:42:39",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "24641 /Users/dev/.local/bin/herdr server\n24642 /Users/dev/.local/bin/herdr server\n85984 herdr\n85985 /Users/dev/.local/bin/herdr server\n",
+  "stderr": ""
+}
