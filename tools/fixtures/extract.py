@@ -101,6 +101,8 @@ HERDR_VERSIONS = {
     "events-2026-09-18-gaps.log": "0.9.0",
     "events-2026-09-20-socket-focus.log": "0.9.0",
     "events-2026-09-23-herdr-0.9.1.log": "0.9.1",
+    "events-2026-09-26-herdr-0.9.1-closes.log": "0.9.1",
+    "events-2026-09-26-herdr-0.9.0-closes.log": "0.9.0",
 }
 
 # {raw log: [(category, name, header line, provenance, why)]}
@@ -152,6 +154,18 @@ SELECTIONS = {
         ("focus", "socket-pane-focus-moved-pane-focused", 569, "programmatic", "Socket pane.focus onto a pane in another tab, the call a click makes"),
         ("shell", "done-focused-terminal-in-background", 448, "programmatic", "Reported idle arrives as done on a pane focused in Herdr while the terminal app is in the background"),
         ("lifecycle", "pane-closed-by-cli", 555, "programmatic", "herdr pane close on a pane in a background tab"),
+    ],
+    "events-2026-09-26-herdr-0.9.1-closes.log": [
+        ("lifecycle", "tab-closed", 576, "manual", "User closed a tab with two panes: tab.closed only, no pane.closed, and no pane ids"),
+        ("lifecycle", "workspace-closed", 668, "manual", "User closed a workspace with two tabs: workspace.closed only, no tab.closed or pane.closed"),
+        ("lifecycle", "tab-closed-by-cli", 41, "programmatic", "herdr tab close on a background tab with two panes"),
+        ("lifecycle", "workspace-closed-by-cli", 133, "programmatic", "herdr workspace close on a background workspace with two tabs and three panes"),
+        ("lifecycle", "tab-closed-by-pane-move", 797, "programmatic", "herdr pane move took the tab's only pane into another tab: tab.closed while the pane lives on"),
+    ],
+    "events-2026-09-26-herdr-0.9.0-closes.log": [
+        ("lifecycle", "tab-closed-by-cli-0.9.0", 119, "programmatic", "herdr tab close on a background tab with two panes"),
+        ("lifecycle", "workspace-closed-by-cli-0.9.0", 211, "programmatic", "herdr workspace close on a background workspace with two tabs and three panes"),
+        ("lifecycle", "tab-closed-by-pane-move-0.9.0", 381, "programmatic", "herdr pane move took the tab's last pane to another workspace: tab.closed, and the pane's id changed"),
     ],
 }
 

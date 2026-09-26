@@ -1039,6 +1039,238 @@ fn closing_a_pane_with_nothing_up_does_nothing() {
     assert_eq!(harness.state.job_ids().unwrap().len(), 1, "w1:p9's job");
 }
 
+/// A captured event with some fields of `data` changed.
+fn retarget(fixture: &str, fields: &[(&str, &str)]) -> Envelope {
+    let mut root: serde_json::Value =
+        serde_json::from_str(&Fixture::load(fixture).event_json).expect("event_json parses");
+    for (key, value) in fields {
+        root["data"][*key] = (*value).into();
+    }
+    Envelope::parse(&root.to_string()).expect("retargeted fixture parses")
+}
+
+/// Posts a Claude `blocked` for `pane_id` in `workspace_id` on a harness
+/// that already has banners up.
+fn also_blocked_on(harness: &mut Harness, pane_id: &str, workspace_id: &str) {
+    harness.runner = Replay::answering(
+        "herdr",
+        &["pane", "get", pane_id],
+        &Recorded::cli("pane-get-unfocused"),
+    );
+    let outcome = harness.handle_envelope(&retarget(
+        "agent/blocked",
+        &[("pane_id", pane_id), ("workspace_id", workspace_id)],
+    ));
+    assert!(
+        matches!(outcome, Outcome::Posted(_)),
+        "agent/blocked on {pane_id}: {outcome:?}"
+    );
+}
+
+/// Banners on `w1:p9`, which `cli/pane-list` doesn't have, and on `w1:p2`,
+/// which it does. `pane list` is answered from that capture.
+fn banners_on_a_gone_and_a_live_pane(test_name: &str) -> Harness {
+    let mut harness = blocked_on(test_name, "w1:p9");
+    also_blocked_on(&mut harness, "w1:p2", "w1");
+    harness.runner = Replay::new([Recorded::cli("pane-list")]);
+    harness
+}
+
+fn job_panes(harness: &Harness) -> Vec<String> {
+    let mut panes: Vec<String> = harness
+        .state
+        .job_ids()
+        .unwrap()
+        .iter()
+        .map(|id| match harness.state.job(id) {
+            Ok(Loaded::Found(job)) => job.pane_id,
+            other => panic!("job {id}: {other:?}"),
+        })
+        .collect();
+    panes.sort();
+    panes
+}
+
+/// Herdr sends no `pane.closed` for the panes of a closed tab, by hand or by
+/// CLI, on either version, and the event doesn't list them.
+#[test]
+fn closing_a_tab_withdraws_the_banners_of_panes_that_are_gone() {
+    for fixture in [
+        "lifecycle/tab-closed",
+        "lifecycle/tab-closed-by-cli",
+        "lifecycle/tab-closed-by-cli-0.9.0",
+    ] {
+        let harness = banners_on_a_gone_and_a_live_pane("tab_close_withdraws");
+        assert_eq!(
+            harness.handle(fixture),
+            Outcome::PanesGone(vec!["herdr-nudge-w1:p9".to_owned()]),
+            "{fixture}"
+        );
+        assert_eq!(
+            removes(&harness.spy),
+            vec!["herdr-nudge-w1:p9"],
+            "{fixture}: -remove"
+        );
+        assert_eq!(job_panes(&harness), vec!["w1:p2"], "{fixture}: jobs left");
+        assert_eq!(harness.runner.call_count(), 1, "{fixture}: one pane list");
+    }
+}
+
+/// A closed workspace takes the jobs posted in it, with no question to
+/// Herdr: a pane id carries its workspace. Each capture is retargeted to
+/// `w1`, where the banners are.
+#[test]
+fn closing_a_workspace_withdraws_the_banners_posted_in_it() {
+    for fixture in [
+        "lifecycle/workspace-closed",
+        "lifecycle/workspace-closed-by-cli",
+        "lifecycle/workspace-closed-by-cli-0.9.0",
+    ] {
+        let mut harness = banners_on_a_gone_and_a_live_pane("workspace_close_withdraws");
+        also_blocked_on(&mut harness, "w3:p9", "w3");
+        harness.runner = Replay::new([]);
+        assert_eq!(
+            harness.handle_envelope(&retarget(fixture, &[("workspace_id", "w1")])),
+            Outcome::PanesGone(vec![
+                "herdr-nudge-w1:p2".to_owned(),
+                "herdr-nudge-w1:p9".to_owned()
+            ]),
+            "{fixture}"
+        );
+        assert_eq!(job_panes(&harness), vec!["w3:p9"], "{fixture}: jobs left");
+        assert_eq!(
+            harness.runner.call_count(),
+            0,
+            "{fixture}: ran a subprocess"
+        );
+    }
+}
+
+/// Moving a tab's only pane into another tab of the same workspace closes
+/// the tab. The pane keeps its id and is still listed, so its banner stays.
+#[test]
+fn a_tab_closed_by_moving_its_pane_within_the_workspace_leaves_its_banner() {
+    let mut harness = blocked_on("pane_move_keeps", "w1:p2");
+    harness.runner = Replay::new([Recorded::cli("pane-list")]);
+    assert_eq!(
+        harness.handle("lifecycle/tab-closed-by-pane-move"),
+        Outcome::NothingShowing
+    );
+    assert_eq!(removes(&harness.spy), Vec::<String>::new());
+    assert_eq!(job_panes(&harness), vec!["w1:p2"]);
+}
+
+/// Moving a tab's last pane to another workspace closes the tab and gives
+/// the pane a new id (`w1:p4` became `w4:p2` in this capture). The job's
+/// id is gone, so is its banner. `cli/pane-list` is from another day, so
+/// the job is put on `w1:p9`, which it doesn't list.
+#[test]
+fn a_tab_closed_by_moving_its_pane_to_another_workspace_withdraws_the_old_id() {
+    let mut harness = blocked_on("pane_move_away", "w1:p9");
+    harness.runner = Replay::new([Recorded::cli("pane-list")]);
+    assert_eq!(
+        harness.handle("lifecycle/tab-closed-by-pane-move-0.9.0"),
+        Outcome::PanesGone(vec!["herdr-nudge-w1:p9".to_owned()])
+    );
+    assert_eq!(job_panes(&harness), Vec::<String>::new());
+}
+
+#[test]
+fn closing_a_tab_with_nothing_up_asks_herdr_nothing() {
+    let harness = Harness::new("container_close_nothing_up", Vec::new());
+    assert_eq!(
+        harness.handle("lifecycle/tab-closed"),
+        Outcome::NothingShowing
+    );
+    assert_eq!(
+        harness.handle("lifecycle/workspace-closed"),
+        Outcome::NothingShowing
+    );
+    assert_eq!(harness.runner.call_count(), 0, "ran a subprocess");
+}
+
+/// Without a pane list a closed tab has nothing to go by, so its banners
+/// stay until they expire.
+#[test]
+fn a_closed_tab_leaves_banners_when_panes_cant_be_listed() {
+    let mut harness = blocked_on("tab_close_no_list", "w1:p9");
+    harness.runner = Replay::new([]);
+    assert_eq!(
+        harness.handle("lifecycle/tab-closed"),
+        Outcome::NothingShowing
+    );
+    assert_eq!(removes(&harness.spy), Vec::<String>::new());
+    assert_eq!(job_panes(&harness), vec!["w1:p9"]);
+}
+
+/// A second session numbers its panes the same way. Its `w1:p9` closing,
+/// getting focus, changing status, or its tab or workspace closing, says
+/// nothing about ours, and asks Herdr nothing.
+#[test]
+fn another_servers_events_leave_our_banner_alone() {
+    let other_session = |harness: &mut Harness| {
+        harness.socket = harness.socket.with_file_name("other-session.sock");
+    };
+    let cases: [(&str, Envelope); 5] = [
+        ("pane.closed", on_pane("lifecycle/pane-closed", "w1:p9")),
+        (
+            "pane.focused",
+            on_pane("focus/manual-tab-click-pane-focused", "w1:p9"),
+        ),
+        ("working", on_pane("agent/working", "w1:p9")),
+        (
+            "tab.closed",
+            Fixture::load("lifecycle/tab-closed").envelope(),
+        ),
+        (
+            "workspace.closed",
+            retarget("lifecycle/workspace-closed", &[("workspace_id", "w1")]),
+        ),
+    ];
+    for (name, envelope) in cases {
+        let mut harness = blocked_on("other_server_events", "w1:p9");
+        harness.runner = Replay::new([Recorded::cli("pane-list")]);
+        other_session(&mut harness);
+        let outcome = harness.handle_envelope(&envelope);
+        assert!(
+            !matches!(outcome, Outcome::Withdrawn(_) | Outcome::PanesGone(_)),
+            "{name}: {outcome:?}"
+        );
+        assert_eq!(
+            removes(&harness.spy),
+            Vec::<String>::new(),
+            "{name}: -remove"
+        );
+        assert_eq!(job_panes(&harness), vec!["w1:p9"], "{name}: jobs left");
+        assert_eq!(harness.runner.call_count(), 0, "{name}: ran a subprocess");
+    }
+}
+
+/// The group is the pane id alone, so another session's post for the same
+/// id replaces our banner on screen. Our job goes with it, or a later
+/// withdrawal for it would take the other session's banner down.
+#[test]
+fn another_servers_post_for_the_same_pane_id_replaces_our_job() {
+    let mut harness = blocked_on("other_server_post", "w1:p9");
+    harness.socket = harness.socket.with_file_name("other-session.sock");
+    harness.runner = Replay::answering(
+        "herdr",
+        &["pane", "get", "w1:p9"],
+        &Recorded::cli("pane-get-unfocused"),
+    );
+    assert!(matches!(
+        harness.handle_envelope(&on_pane("agent/done", "w1:p9")),
+        Outcome::Posted(_)
+    ));
+    assert_eq!(removes(&harness.spy), Vec::<String>::new());
+    let jobs = harness.state.job_ids().unwrap();
+    assert_eq!(jobs.len(), 1, "only the new job");
+    let Ok(Loaded::Found(job)) = harness.state.job(&jobs[0]) else {
+        panic!("job {}", jobs[0]);
+    };
+    assert_eq!(job.socket_path, harness.socket, "the other session's job");
+}
+
 /// 0.9.1 sends `pane.focused` when the user clicks their way to a pane.
 #[test]
 fn going_to_the_pane_withdraws_its_banner() {

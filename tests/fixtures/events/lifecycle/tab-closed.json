@@ -1,0 +1,23 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-26-herdr-0.9.1-closes.log:576",
+  "herdr_version": "0.9.1",
+  "captured_at": "14:33:46",
+  "provenance": "manual",
+  "mark": "[manual] user closes tab r1-manual-tab (w3:tJ, 2 panes) from the TUI, then workspace r1-manual-ws (w6, 2 tabs) from the TUI",
+  "why": "User closed a tab with two panes: tab.closed only, no pane.closed, and no pane ids",
+  "event": "tab.closed",
+  "event_json": "{\"event\":\"tab_closed\",\"data\":{\"type\":\"tab_closed\",\"tab_id\":\"w3:tJ\",\"workspace_id\":\"w3\"}}",
+  "env": {
+    "HERDR_BIN_PATH": "/Users/dev/.local/bin/herdr",
+    "HERDR_ENV": "1",
+    "HERDR_PLUGIN_CONFIG_DIR": "/Users/dev/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w3\",\"tab_id\":\"w3:tJ\",\"invocation_source\":\"api\",\"correlation_id\":\"tab.closed\"}",
+    "HERDR_PLUGIN_EVENT": "tab.closed",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/Users/dev/Developer/herdr-nudge/tools/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/Users/dev/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/Users/dev/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w3:tJ",
+    "HERDR_WORKSPACE_ID": "w3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-26-herdr-0.9.1-closes.log:797",
+  "herdr_version": "0.9.1",
+  "captured_at": "14:34:38",
+  "provenance": "programmatic",
+  "mark": "[programmatic] scratch workspaces: herdr pane move of a tab's only pane into another tab, then into another workspace",
+  "why": "herdr pane move took the tab's only pane into another tab: tab.closed while the pane lives on",
+  "event": "tab.closed",
+  "event_json": "{\"event\":\"tab_closed\",\"data\":{\"type\":\"tab_closed\",\"tab_id\":\"w7:t2\",\"workspace_id\":\"w7\"}}",
+  "env": {
+    "HERDR_BIN_PATH": "/Users/dev/.local/bin/herdr",
+    "HERDR_ENV": "1",
+    "HERDR_PLUGIN_CONFIG_DIR": "/Users/dev/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w7\",\"tab_id\":\"w7:t2\",\"invocation_source\":\"api\",\"correlation_id\":\"tab.closed\"}",
+    "HERDR_PLUGIN_EVENT": "tab.closed",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/Users/dev/Developer/herdr-nudge/tools/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/Users/dev/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/Users/dev/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w7:t2",
+    "HERDR_WORKSPACE_ID": "w7"
+  }
+}

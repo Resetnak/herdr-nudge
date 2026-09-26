@@ -21,3 +21,12 @@ command = ["./bin/herdr-nudge"]
 [[events]]
 on = "pane.focused"
 command = ["./bin/herdr-nudge"]
+
+# Closing a tab or a workspace sends no pane.closed for the panes in it.
+[[events]]
+on = "tab.closed"
+command = ["./bin/herdr-nudge"]
+
+[[events]]
+on = "workspace.closed"
+command = ["./bin/herdr-nudge"]

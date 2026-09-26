@@ -9,9 +9,9 @@
 //!
 //! Every event also reads `jobs/` once, before anything else. A job is a
 //! notification that is up, and one that no longer says what the pane is
-//! doing gets taken down: the pane changed status, closed, or the user went
-//! to it. That read costs no subprocess, and nothing is started unless a job
-//! turns out to be stale.
+//! doing gets taken down: the pane changed status, closed (alone or with its
+//! tab or workspace), or the user went to it. That read costs no subprocess,
+//! and nothing is started unless a job turns out to be stale.
 //!
 //! Herdr doesn't wait for one hook before starting the next, so two can run
 //! at once for the same pane, and nothing here locks. Two events for one
@@ -81,7 +81,11 @@ pub enum Outcome {
     /// The pane closed, or the user went to it, and its notification was
     /// taken down. Holds the group.
     Withdrawn(String),
-    /// The pane closed or got focus, and it had no notification up.
+    /// A tab or workspace closed and these panes went with it. Holds their
+    /// groups.
+    PanesGone(Vec<String>),
+    /// The pane closed or got focus, or a tab or workspace closed, and
+    /// nothing it had was up.
     NothingShowing,
     /// The pane got focus while no terminal showing Herdr was in front, so
     /// the user can't have seen it. A script moving focus looks like this.
@@ -166,10 +170,17 @@ pub fn handle<R: Runner, S: Spawner>(
             status_changed(deps, event, context, &jobs, &mut notes)
         }
         EventData::PaneClosed(pane) => {
-            let mine = for_pane(&jobs, &pane.pane_id);
+            let mine = ours_for_pane(deps, &jobs, &pane.pane_id);
             withdraw_all(deps, &mine, &mut notes)
         }
         EventData::PaneFocused(pane) => focused(deps, &pane.pane_id, &jobs, &mut notes),
+        EventData::TabClosed(_) => container_closed(deps, Closed::Tab, &jobs, &mut notes),
+        EventData::WorkspaceClosed(workspace) => container_closed(
+            deps,
+            Closed::Workspace(&workspace.workspace_id),
+            &jobs,
+            &mut notes,
+        ),
         _ => Outcome::NotHandled,
     };
     Report { outcome, notes }
@@ -348,7 +359,7 @@ fn focused<R: Runner, S: Spawner>(
     jobs: &[StoredJob],
     notes: &mut Vec<String>,
 ) -> Outcome {
-    let mine = for_pane(jobs, pane_id);
+    let mine = ours_for_pane(deps, jobs, pane_id);
     if mine.is_empty() {
         return Outcome::NothingShowing;
     }
@@ -357,6 +368,67 @@ fn focused<R: Runner, S: Spawner>(
         return Outcome::FocusedUnseen;
     }
     withdraw_all(deps, &mine, notes)
+}
+
+/// A tab or workspace closed. Herdr sends no `pane.closed` for the panes
+/// that went with it, and the event doesn't list them.
+///
+/// A workspace's panes are the jobs posted with its id: a pane id carries
+/// its workspace, and a pane moved to another workspace gets a new id
+/// there. So a closed workspace needs no question to Herdr.
+///
+/// A tab can't be matched that way. Jobs don't carry a tab id, and moving
+/// a tab's last pane into another tab closes the tab while the pane lives
+/// on (`tests/fixtures/events/lifecycle/tab-closed-by-pane-move.json`). So
+/// a closed tab asks which panes are left, and takes down the notifications
+/// of the ones that aren't. That also catches a pane moved to another
+/// workspace, whose old id is gone. By the time the hook runs, `pane list`
+/// no longer has the closed panes (checked live on 0.9.0 and 0.9.1). If the
+/// list can't be had, the jobs stay until they expire or a click finds the
+/// pane gone.
+fn container_closed<R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    closed: Closed<'_>,
+    jobs: &[StoredJob],
+    notes: &mut Vec<String>,
+) -> Outcome {
+    let ours = ours(deps, jobs);
+    if ours.is_empty() {
+        return Outcome::NothingShowing;
+    }
+    let gone: Vec<&StoredJob> = match closed {
+        Closed::Workspace(workspace_id) => ours
+            .into_iter()
+            .filter(|(_, job)| job.workspace_id == workspace_id)
+            .collect(),
+        Closed::Tab => {
+            let cli = Cli {
+                bin: deps.herdr_bin,
+                runner: deps.runner,
+            };
+            match cli.pane_ids() {
+                Ok(panes) => ours
+                    .into_iter()
+                    .filter(|(_, job)| !panes.contains(&job.pane_id))
+                    .collect(),
+                Err(e) => {
+                    notes.push(format!("could not list panes: {e}"));
+                    Vec::new()
+                }
+            }
+        }
+    };
+    if gone.is_empty() {
+        return Outcome::NothingShowing;
+    }
+    let groups: BTreeSet<String> = gone.iter().map(|(_, job)| job.group.clone()).collect();
+    withdraw(deps.state, deps.spawner, gone.into_iter(), notes);
+    Outcome::PanesGone(groups.into_iter().collect())
+}
+
+enum Closed<'a> {
+    Tab,
+    Workspace(&'a str),
 }
 
 fn withdraw_all<R: Runner, S: Spawner>(
@@ -382,7 +454,7 @@ fn status_changed<R: Runner, S: Spawner>(
     jobs: &[StoredJob],
     notes: &mut Vec<String>,
 ) -> Outcome {
-    let mine = for_pane(jobs, &event.pane_id);
+    let mine = ours_for_pane(deps, jobs, &event.pane_id);
 
     // Only the newest is on screen, because the group is per pane and each
     // post replaced the one before. Anything older is left over from a
@@ -409,8 +481,16 @@ fn status_changed<R: Runner, S: Spawner>(
     // the status above. A new post already replaced it on screen, in the same
     // group, so only the files go. A `-remove` now could reach the notifier
     // after the post and take the new banner down with it.
+    //
+    // The group has no server in it, so the post also replaced another
+    // session's banner for the same pane id. Its job goes too, or a later
+    // withdrawal for it would take this banner down.
     if matches!(outcome, Outcome::Posted(_)) {
-        forget(deps.state, mine.iter().copied(), notes);
+        forget(
+            deps.state,
+            for_pane(jobs, &event.pane_id).into_iter(),
+            notes,
+        );
     } else if !mine.is_empty() {
         withdraw(deps.state, deps.spawner, mine.iter().copied(), notes);
     }
@@ -674,8 +754,30 @@ fn fetch_agents<R: Runner>(
     Some(cache)
 }
 
+/// Every job for this pane id, whichever server posted it: what a new post
+/// replaces on screen, since the group is the pane id alone.
 fn for_pane<'a>(jobs: &'a [StoredJob], pane_id: &str) -> Vec<&'a StoredJob> {
     jobs.iter()
+        .filter(|(_, job)| job.pane_id == pane_id)
+        .collect()
+}
+
+/// The jobs this server posted. A second Herdr session numbers its panes
+/// the same way, so its `w1:p1` closing or getting focus says nothing
+/// about ours.
+fn ours<'a, R: Runner, S: Spawner>(deps: &Deps<R, S>, jobs: &'a [StoredJob]) -> Vec<&'a StoredJob> {
+    jobs.iter()
+        .filter(|(_, job)| job.socket_path == deps.socket_path)
+        .collect()
+}
+
+fn ours_for_pane<'a, R: Runner, S: Spawner>(
+    deps: &Deps<R, S>,
+    jobs: &'a [StoredJob],
+    pane_id: &str,
+) -> Vec<&'a StoredJob> {
+    ours(deps, jobs)
+        .into_iter()
         .filter(|(_, job)| job.pane_id == pane_id)
         .collect()
 }

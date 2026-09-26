@@ -9,13 +9,14 @@
 //! - Shell reports leave `title`, `display_agent` and `state_labels` out
 //!   rather than sending nulls.
 //!
-//! So only `pane_id`, `workspace_id` and `agent_status` are ever required,
-//! and an event type or status we don't recognise parses as `Other` rather
-//! than failing, so a Herdr update shouldn't break the plugin.
+//! So only `pane_id`, `workspace_id` and `agent_status` are ever required
+//! (and `tab_id` on `tab.closed`), and an event type or status we don't
+//! recognise parses as `Other` rather than failing, so a Herdr update
+//! shouldn't break the plugin.
 //!
 //! What does still fail the parse: a payload with no `type` field, or one
-//! missing those three required fields. Every captured event has all of
-//! them, and a failure is logged and ignored rather than crashing the hook.
+//! missing a required field. Every captured event has them, and a failure
+//! is logged and ignored rather than crashing the hook.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -46,6 +47,8 @@ pub enum EventData {
     PaneAgentDetected(DetectedEvent),
     PaneFocused(PaneRef),
     PaneClosed(PaneRef),
+    TabClosed(TabRef),
+    WorkspaceClosed(WorkspaceRef),
     /// Events we don't handle: `pane.created`, `tab.created`, `tab.focused`,
     /// `workspace.focused`, and anything Herdr adds later.
     #[serde(other)]
@@ -92,6 +95,21 @@ pub struct PaneRef {
     pub workspace_id: String,
 }
 
+/// `tab.closed`. It doesn't say which panes closed with the tab, and Herdr
+/// sends no `pane.closed` for them (`tests/fixtures/events/lifecycle/tab-closed*`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct TabRef {
+    pub tab_id: String,
+    pub workspace_id: String,
+}
+
+/// `workspace.closed`. It also carries a `workspace` object with counts, but
+/// no pane or tab ids, and no `pane.closed` or `tab.closed` follows.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkspaceRef {
+    pub workspace_id: String,
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
@@ -129,7 +147,7 @@ impl EventData {
             EventData::PaneAgentStatusChanged(e) => Some(&e.pane_id),
             EventData::PaneAgentDetected(e) => Some(&e.pane_id),
             EventData::PaneFocused(p) | EventData::PaneClosed(p) => Some(&p.pane_id),
-            EventData::Other => None,
+            EventData::TabClosed(_) | EventData::WorkspaceClosed(_) | EventData::Other => None,
         }
     }
 
@@ -138,6 +156,8 @@ impl EventData {
             EventData::PaneAgentStatusChanged(e) => Some(&e.workspace_id),
             EventData::PaneAgentDetected(e) => Some(&e.workspace_id),
             EventData::PaneFocused(p) | EventData::PaneClosed(p) => Some(&p.workspace_id),
+            EventData::TabClosed(t) => Some(&t.workspace_id),
+            EventData::WorkspaceClosed(w) => Some(&w.workspace_id),
             EventData::Other => None,
         }
     }

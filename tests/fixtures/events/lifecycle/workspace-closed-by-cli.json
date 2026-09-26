@@ -1,0 +1,23 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-26-herdr-0.9.1-closes.log:133",
+  "herdr_version": "0.9.1",
+  "captured_at": "14:25:14",
+  "provenance": "programmatic",
+  "mark": "[programmatic] herdr workspace create --no-focus, second tab, split, then herdr workspace close",
+  "why": "herdr workspace close on a background workspace with two tabs and three panes",
+  "event": "workspace.closed",
+  "event_json": "{\"event\":\"workspace_closed\",\"data\":{\"type\":\"workspace_closed\",\"workspace_id\":\"w4\",\"workspace\":{\"workspace_id\":\"w4\",\"number\":4,\"label\":\"r1-ws\",\"focused\":false,\"pane_count\":3,\"tab_count\":2,\"active_tab_id\":\"w4:t1\",\"agent_status\":\"unknown\"}}}",
+  "env": {
+    "HERDR_BIN_PATH": "/Users/dev/.local/bin/herdr",
+    "HERDR_ENV": "1",
+    "HERDR_PLUGIN_CONFIG_DIR": "/Users/dev/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w4\",\"workspace_label\":\"r1-ws\",\"tab_id\":\"w4:t1\",\"invocation_source\":\"api\",\"correlation_id\":\"workspace.closed\"}",
+    "HERDR_PLUGIN_EVENT": "workspace.closed",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/Users/dev/Developer/herdr-nudge/tools/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/Users/dev/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/Users/dev/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w4:t1",
+    "HERDR_WORKSPACE_ID": "w4"
+  }
+}

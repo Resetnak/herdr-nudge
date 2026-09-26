@@ -1,0 +1,23 @@
+{
+  "source": "tests/fixtures/raw/events-2026-09-26-herdr-0.9.0-closes.log:381",
+  "herdr_version": "0.9.0",
+  "captured_at": "14:27:20",
+  "provenance": "programmatic",
+  "mark": "[programmatic] pane move between tabs and workspaces (not a fixture, checking ids)",
+  "why": "herdr pane move took the tab's last pane to another workspace: tab.closed, and the pane's id changed",
+  "event": "tab.closed",
+  "event_json": "{\"event\":\"tab_closed\",\"data\":{\"type\":\"tab_closed\",\"tab_id\":\"w1:t3\",\"workspace_id\":\"w1\"}}",
+  "env": {
+    "HERDR_BIN_PATH": "/private/tmp/claude-501/-Users-dev-Developer-herdr-nudge/00000000-0000-4000-8000-000000000005/scratchpad/herdr-0.9.0",
+    "HERDR_ENV": "1",
+    "HERDR_PLUGIN_CONFIG_DIR": "/tmp/r1h/.config/herdr/plugins/config/probe",
+    "HERDR_PLUGIN_CONTEXT_JSON": "{\"workspace_id\":\"w1\",\"tab_id\":\"w1:t3\",\"invocation_source\":\"api\",\"correlation_id\":\"tab.closed\"}",
+    "HERDR_PLUGIN_EVENT": "tab.closed",
+    "HERDR_PLUGIN_ID": "probe",
+    "HERDR_PLUGIN_ROOT": "/private/tmp/r1h/probe",
+    "HERDR_PLUGIN_STATE_DIR": "/tmp/r1h/.local/state/herdr/plugins/probe",
+    "HERDR_SOCKET_PATH": "/tmp/r1h/.config/herdr/herdr.sock",
+    "HERDR_TAB_ID": "w1:t3",
+    "HERDR_WORKSPACE_ID": "w1"
+  }
+}

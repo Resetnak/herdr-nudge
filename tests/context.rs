@@ -59,11 +59,35 @@ fn a_labelled_workspace_displays_its_label() {
 fn every_fixture_environment_resolves_to_paths() {
     for fixture in Fixture::all() {
         let env = fixture.herdr_env();
-        assert_eq!(env.herdr_bin, PathBuf::from("/Users/dev/.local/bin/herdr"));
-        assert_eq!(
-            env.socket_path,
-            PathBuf::from("/Users/dev/.config/herdr/herdr.sock")
-        );
+        // The 0.9.0 close captures come from a throwaway server with its own
+        // home, so its socket is there; `herdr` was the downloaded release.
+        if fixture.source.contains("herdr-0.9.0-closes") {
+            assert_eq!(
+                env.socket_path,
+                PathBuf::from("/tmp/r1h/.config/herdr/herdr.sock"),
+                "{}",
+                fixture.name
+            );
+            assert!(
+                env.herdr_bin.ends_with("herdr-0.9.0"),
+                "{}: herdr_bin {}",
+                fixture.name,
+                env.herdr_bin.display()
+            );
+        } else {
+            assert_eq!(
+                env.herdr_bin,
+                PathBuf::from("/Users/dev/.local/bin/herdr"),
+                "{}",
+                fixture.name
+            );
+            assert_eq!(
+                env.socket_path,
+                PathBuf::from("/Users/dev/.config/herdr/herdr.sock"),
+                "{}",
+                fixture.name
+            );
+        }
         assert!(
             env.state_dir.is_absolute() && env.config_dir.is_absolute(),
             "{}: relative paths",

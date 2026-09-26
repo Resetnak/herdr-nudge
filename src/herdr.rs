@@ -6,6 +6,7 @@
 //! Reply shapes are pinned by `tests/fixtures/cli/` and
 //! `tests/fixtures/socket/`.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -145,6 +146,21 @@ impl<R: Runner> Cli<'_, R> {
         }
         self.query::<Body>(&["pane", "get", pane_id])
             .map(|r| r.pane)
+    }
+
+    /// Every pane the server has, across all workspaces. Only the ids are
+    /// read.
+    pub fn pane_ids(&self) -> Result<BTreeSet<String>, Error> {
+        #[derive(Deserialize)]
+        struct Pane {
+            pane_id: String,
+        }
+        #[derive(Deserialize)]
+        struct Body {
+            panes: Vec<Pane>,
+        }
+        self.query::<Body>(&["pane", "list"])
+            .map(|r| r.panes.into_iter().map(|p| p.pane_id).collect())
     }
 
     /// The agent labels Herdr can detect by itself, e.g. `claude`, `codex`.

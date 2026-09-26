@@ -1,8 +1,8 @@
 # Test fixtures
 
 Every file here was captured from Herdr 0.9.0 or 0.9.1 on the dev machine,
-except any a later `verify.py --record` adds (below), which come from a
-throwaway server. None is hand-written. Don't edit them; recapture instead. Each event fixture
+some from a throwaway server there (the 0.9.0 close events, finding 17, and
+any a later `verify.py --record` adds, below). None is hand-written. Don't edit them; recapture instead. Each event fixture
 says which Herdr sent it (`herdr_version`, from the raw log it came from),
 and `cli/` and `socket/` captures record `herdr --version`. The two versions
 behave differently in places (finding 3), so both sets stay and both are
@@ -174,6 +174,13 @@ belong to the probe; tests should override them.
 | `focus/socket-pane-focus-moved-pane-focused` | p | 0.9.1: socket `pane.focus` onto a pane in another tab |
 | `shell/done-focused-terminal-in-background` | p | 0.9.1: `done` for a pane focused in Herdr while another app was in front |
 | `lifecycle/pane-closed-by-cli` | p | 0.9.1: `herdr pane close` on a pane in a background tab |
+| `lifecycle/tab-closed` | m | 0.9.1: the user closed a tab with two panes. `tab_id` and `workspace_id` only, no `pane.closed` |
+| `lifecycle/workspace-closed` | m | 0.9.1: the user closed a workspace with two tabs. Counts but no ids of what was in it, no `tab.closed` or `pane.closed` |
+| `lifecycle/tab-closed-by-cli` | p | 0.9.1: `herdr tab close` on a background tab with two panes |
+| `lifecycle/workspace-closed-by-cli` | p | 0.9.1: `herdr workspace close` on a background workspace, two tabs, three panes |
+| `lifecycle/tab-closed-by-pane-move` | p | 0.9.1: `herdr pane move` took a tab's only pane into another tab, which closed the tab while the pane lives on |
+| `lifecycle/{tab,workspace}-closed-by-cli-0.9.0` | p | 0.9.0: the same two closes, on a throwaway server |
+| `lifecycle/tab-closed-by-pane-move-0.9.0` | p | 0.9.0: the same, the pane moved to another workspace, where it got a new id |
 | `cli/agent-get-with-session` | m | `agent_session` present: an agent |
 | `cli/agent-get-reported-no-session` | p | agent label, no `agent_session`: a shell command |
 | `cli/agent-get-plain-shell` | – | `agent_not_found` on stderr, exit 1 |
@@ -343,6 +350,33 @@ restart.
     nothing.** Onto a pane in another tab it sends all three, as on 0.9.0.
 16. **Pane ids are not decimal.** The next pane created in `w3` after `p9`
     was `w3:pA`. Nothing here parses them.
+
+## Findings (2026-09-26 captures, both versions)
+
+`raw/events-2026-09-26-herdr-0.9.1-closes.log` (the dev server) and
+`raw/events-2026-09-26-herdr-0.9.0-closes.log` (a throwaway headless
+server under a scratch `HOME` in `/tmp`, running the downloaded 0.9.0
+release binary, sha256 checked against GitHub's; the binary's path in its
+`HERDR_BIN_PATH` is a temp directory, and `scrub` took a UUID in that path
+for an agent session).
+
+17. **Closing a tab or a workspace sends no `pane.closed`.** By hand or by
+    CLI, on both versions. `tab.closed` has `tab_id` and `workspace_id`;
+    `workspace.closed` has `workspace_id` and a `workspace` object with
+    counts. Neither lists the panes, and a workspace close sends no
+    `tab.closed` either. Closing a workspace's only tab sends
+    `workspace.closed` then `tab.closed`.
+18. **A tab can close with its pane still alive.** `herdr pane move` of a
+    tab's last pane into another tab closes the old tab (`tab.closed`, and
+    the move's reply has `closed_tab_id`). So a tab id says nothing about
+    which panes are gone.
+19. **A pane moved to another workspace gets a new id** (`w1:p4` → `w4:p2`
+    on 0.9.0, `w7:p2` → `w8:p2` on 0.9.1; `pane.moved` has
+    `previous_pane_id`). Within a workspace it keeps its id.
+20. **By the time a close hook runs, `herdr pane list` no longer has the
+    closed panes.** Checked on 0.9.1 with a throwaway plugin that ran it
+    from its `tab.closed` and `workspace.closed` hooks, three of each: none
+    listed a closed pane. Not kept as a fixture.
 
 ## Still missing
 

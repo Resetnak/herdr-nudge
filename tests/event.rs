@@ -15,6 +15,8 @@ fn expected_variant(event: &str) -> &'static str {
         "pane.agent_detected" => "PaneAgentDetected",
         "pane.focused" => "PaneFocused",
         "pane.closed" => "PaneClosed",
+        "tab.closed" => "TabClosed",
+        "workspace.closed" => "WorkspaceClosed",
         _ => "Other",
     }
 }
@@ -25,6 +27,8 @@ fn variant_of(data: &EventData) -> &'static str {
         EventData::PaneAgentDetected(_) => "PaneAgentDetected",
         EventData::PaneFocused(_) => "PaneFocused",
         EventData::PaneClosed(_) => "PaneClosed",
+        EventData::TabClosed(_) => "TabClosed",
+        EventData::WorkspaceClosed(_) => "WorkspaceClosed",
         EventData::Other => "Other",
     }
 }
@@ -288,6 +292,38 @@ fn focus_and_close_events_carry_only_a_pane_reference() {
     };
     assert_eq!(closed.pane_id, "w1:p1");
     assert_eq!(closed.workspace_id, "w1");
+}
+
+/// Neither close event names a pane, on either version, so the handler has
+/// to ask Herdr which ones went.
+#[test]
+fn tab_and_workspace_close_events_carry_ids_but_no_panes() {
+    for (fixture, tab_id, workspace_id) in [
+        ("lifecycle/tab-closed", "w3:tJ", "w3"),
+        ("lifecycle/tab-closed-by-cli", "w3:tH", "w3"),
+        ("lifecycle/tab-closed-by-cli-0.9.0", "w1:t2", "w1"),
+        ("lifecycle/tab-closed-by-pane-move", "w7:t2", "w7"),
+    ] {
+        let envelope = Fixture::load(fixture).envelope();
+        let EventData::TabClosed(closed) = &envelope.data else {
+            panic!("{fixture}: expected tab.closed");
+        };
+        assert_eq!(closed.tab_id, tab_id, "{fixture}: tab_id");
+        assert_eq!(closed.workspace_id, workspace_id, "{fixture}: workspace_id");
+        assert_eq!(envelope.data.pane_id(), None, "{fixture}: pane_id");
+    }
+    for (fixture, workspace_id) in [
+        ("lifecycle/workspace-closed", "w6"),
+        ("lifecycle/workspace-closed-by-cli", "w4"),
+        ("lifecycle/workspace-closed-by-cli-0.9.0", "w2"),
+    ] {
+        let envelope = Fixture::load(fixture).envelope();
+        let EventData::WorkspaceClosed(closed) = &envelope.data else {
+            panic!("{fixture}: expected workspace.closed");
+        };
+        assert_eq!(closed.workspace_id, workspace_id, "{fixture}: workspace_id");
+        assert_eq!(envelope.data.pane_id(), None, "{fixture}: pane_id");
+    }
 }
 
 /// One line per event, whatever the payload. A title is arbitrary text and

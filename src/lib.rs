@@ -73,6 +73,15 @@ pub fn event_summary(envelope: &Envelope, context: Option<&Context>) -> String {
         EventData::PaneFocused(p) | EventData::PaneClosed(p) => {
             out.push_str(&format!(" pane={} workspace={}", p.pane_id, p.workspace_id));
         }
+        EventData::TabClosed(t) => {
+            out.push_str(&format!(
+                " tab_closed={} workspace={}",
+                t.tab_id, t.workspace_id
+            ));
+        }
+        EventData::WorkspaceClosed(w) => {
+            out.push_str(&format!(" workspace={}", w.workspace_id));
+        }
         EventData::Other => out.push_str(" (not handled)"),
     }
 
