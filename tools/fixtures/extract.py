@@ -28,6 +28,7 @@ OUT = os.path.join(ROOT, "tests/fixtures/events")
 CLI = os.path.join(ROOT, "tests/fixtures/cli")
 SOCKET = os.path.join(ROOT, "tests/fixtures/socket")
 SYS = os.path.join(ROOT, "tests/fixtures/sys")
+HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.local/bin/herdr")
 
 # These fixtures are published, so the capturing machine's identity comes out
 # first. Substitutions are literal, applied everywhere, and idempotent: the
@@ -232,9 +233,8 @@ def cli(name, argv):
     import datetime
     import subprocess
 
-    herdr = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.local/bin/herdr")
-    version = subprocess.run([herdr, "--version"], capture_output=True, text=True).stdout.strip()
-    proc = subprocess.run([herdr] + argv, capture_output=True, text=True)
+    version = subprocess.run([HERDR, "--version"], capture_output=True, text=True).stdout.strip()
+    proc = subprocess.run([HERDR] + argv, capture_output=True, text=True)
     fixture = {
         "argv": ["herdr"] + argv,
         "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -306,15 +306,27 @@ def socket_request(name, method, params):
 
     Only use methods that are safe to repeat: this talks to the live server."""
     import datetime
-    import socket
     import subprocess
 
-    herdr = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.local/bin/herdr")
-    version = subprocess.run([herdr, "--version"], capture_output=True, text=True).stdout.strip()
+    version = subprocess.run([HERDR, "--version"], capture_output=True, text=True).stdout.strip()
     path = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
+    request, reply = ask_socket(path, method, params)
+    out = save(SOCKET, name, {
+        "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "herdr_version": version,
+        "request": request,
+        "response": reply,
+    })
+    print(os.path.relpath(out, ROOT))
+
+
+def ask_socket(path, method, params, timeout=2):
+    """One request line to a Herdr socket. Returns (request, reply line)."""
+    import socket
+
     request = json.dumps({"id": "capture", "method": method, "params": params}) + "\n"
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.settimeout(2)
+    client.settimeout(timeout)
     client.connect(path)
     client.sendall(request.encode())
     reply = b""
@@ -324,13 +336,7 @@ def socket_request(name, method, params):
             break
         reply += chunk
     client.close()
-    out = save(SOCKET, name, {
-        "captured_at": datetime.datetime.now().isoformat(timespec="seconds"),
-        "herdr_version": version,
-        "request": request,
-        "response": reply.decode(),
-    })
-    print(os.path.relpath(out, ROOT))
+    return request, reply.decode()
 
 
 def sys_command(name, argv):

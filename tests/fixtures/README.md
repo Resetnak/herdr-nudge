@@ -1,7 +1,8 @@
 # Test fixtures
 
-Every file here was captured from Herdr 0.9.0 or 0.9.1 on the dev machine.
-None is hand-written. Don't edit them; recapture instead. Each event fixture
+Every file here was captured from Herdr 0.9.0 or 0.9.1 on the dev machine,
+except any a later `verify.py --record` adds (below), which come from a
+throwaway server. None is hand-written. Don't edit them; recapture instead. Each event fixture
 says which Herdr sent it (`herdr_version`, from the raw log it came from),
 and `cli/` and `socket/` captures record `herdr --version`. The two versions
 behave differently in places (finding 3), so both sets stay and both are
@@ -25,6 +26,40 @@ python3 tools/fixtures/extract.py socket NAME METHOD PARAMS_JSON  # into socket/
 python3 tools/fixtures/extract.py sys NAME PROG ARGS  # into sys/
 python3 tools/fixtures/extract.py scrub         # redact the captures in place
 ```
+
+## After a Herdr upgrade
+
+The tests replay these files, so they pass whatever a new Herdr does. To see
+what actually changed, run
+
+```sh
+python3 tools/fixtures/verify.py            # exit 1 if anything moved
+python3 tools/fixtures/verify.py --record   # also save the new version's output where it moved
+```
+
+It starts a throwaway Herdr server under `/tmp/herdr-nudge-verify` (your own
+server is never contacted), sets up panes the way the newest captures had
+them, runs the same queries, and prints every key path, type or error code
+that differs from the capture for the installed version, or from the newest
+older one when there isn't one yet. `sys/` captures are run again on this
+Mac the same way. Values that only reflect state (ids, titles, paths,
+timestamps, notification settings) are ignored. The older captures of a name
+aren't always the same scenario (`cli/pane-get-unfocused` is a plain shell
+on 0.9.0 and a claimed pane on 0.9.1), so running this on an older Herdr can
+report changes that aren't there. The script lists the captures it skips and
+why, and fails on any capture it doesn't know about.
+
+`agent-manifests` needs a network: a new server fetches the manifests a few
+seconds after it starts.
+
+So a version gets its own capture (`<name>-<version>.json`) only where its
+output differs from the older one. A capture that still matches already
+describes the newer version. Captures made by `--record` come from the
+throwaway server, with a stand-in `claude` script for the agent.
+
+When a Herdr version stops being supported, delete the captures that only it
+has, and any test that replays them, in the same change. Otherwise
+nothing here ever shrinks.
 
 ## Redaction
 
