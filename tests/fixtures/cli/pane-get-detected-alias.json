@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "pane",
+    "get",
+    "w1:p1"
+  ],
+  "captured_at": "2026-09-26T15:49:07",
+  "herdr_version": "herdr 0.9.0",
+  "exit_code": 0,
+  "stdout": "{\"id\":\"cli:pane:get\",\"result\":{\"pane\":{\"agent\":\"cursor\",\"agent_status\":\"unknown\",\"cwd\":\"/private/tmp/r2h\",\"focused\":true,\"foreground_cwd\":\"/private/tmp/r2h\",\"pane_id\":\"w1:p1\",\"revision\":0,\"scroll\":{\"max_offset_from_bottom\":0,\"offset_from_bottom\":0,\"viewport_rows\":40},\"tab_id\":\"w1:t1\",\"terminal_id\":\"term_65c6aa3d990ce1\",\"workspace_id\":\"w1\"},\"type\":\"pane_info\"}}\n",
+  "stderr": ""
+}

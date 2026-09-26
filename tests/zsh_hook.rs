@@ -7,6 +7,9 @@
 //! the hook; a `Pause` between them is a person waiting at the prompt. The
 //! threshold is 1 s and the long commands sleep for 1.6 s, so each test
 //! takes a few seconds.
+//!
+//! The stub answers `pane get` with a captured reply, a plain shell pane
+//! unless a test picks another.
 
 mod support;
 
@@ -19,14 +22,24 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use herdr_nudge::shell_hook;
 use herdr_nudge::state::{AgentsCache, StateDir};
-use support::{Replay, scratch_dir};
+use support::{Recorded, Replay, scratch_dir};
 
 const PANE: &str = "w9:p1";
 const SOURCE: &str = "herdr-nudge-zsh";
 
 /// Logs each call as one line, arguments split by the unit separator so a
-/// title with spaces stays one argument.
-const STUB: &str = "#!/bin/sh\nIFS=$(printf '\\037')\nprintf '%s\\n' \"$*\" >> \"$STUB_LOG\"\n";
+/// title with spaces stays one argument. `pane get` prints the reply files
+/// next to the log.
+const STUB: &str = r#"#!/bin/sh
+IFS=$(printf '\037')
+printf '%s\n' "$*" >> "$STUB_LOG"
+[ "$1" = pane ] && [ "$2" = get ] || exit 0
+d=$(dirname "$STUB_LOG")
+[ -f "$d/pane-get.sleep" ] && sleep "$(cat "$d/pane-get.sleep")"
+cat "$d/pane-get.out"
+cat "$d/pane-get.err" >&2
+exit "$(cat "$d/pane-get.code")"
+"#;
 
 enum Step<'a> {
     Line(&'a str),
@@ -48,7 +61,7 @@ struct Shell {
 impl Shell {
     /// A state directory with the hook and `shell.env` written by the real
     /// installer, from `config` (a `config.toml`) and an agent list with
-    /// `claude` in it.
+    /// `claude` and `cursor` in it.
     fn new(test: &str, config: &str) -> Shell {
         let dir = scratch_dir(test);
         let config_dir = dir.join("config");
@@ -57,7 +70,10 @@ impl Shell {
 
         let state = StateDir::new(dir.join("state"));
         state
-            .save_agents_cache(&AgentsCache::new(["claude".to_owned()], 0))
+            .save_agents_cache(&AgentsCache::new(
+                ["claude".to_owned(), "cursor".to_owned()],
+                0,
+            ))
             .unwrap();
         let notes = shell_hook::install(&state, Some(&config_dir), None, None, &Replay::new([]));
         assert!(
@@ -77,12 +93,27 @@ impl Shell {
             .unwrap();
         assert!(warm.success());
 
-        Shell {
+        let shell = Shell {
             log: dir.join("herdr-calls.log"),
             dir,
             state,
             env: Vec::new(),
-        }
+        };
+        shell.answer_pane_get("pane-get-unfocused");
+        shell
+    }
+
+    /// `pane get` answers as `tests/fixtures/cli/<name>.json` did.
+    fn answer_pane_get(&self, name: &str) {
+        let reply = Recorded::cli(name);
+        fs::write(self.dir.join("pane-get.out"), &reply.stdout).unwrap();
+        fs::write(self.dir.join("pane-get.err"), &reply.stderr).unwrap();
+        fs::write(self.dir.join("pane-get.code"), reply.exit_code.to_string()).unwrap();
+    }
+
+    /// `pane get` takes this long to answer, as against a stopped server.
+    fn delay_pane_get(&self, seconds: u32) {
+        fs::write(self.dir.join("pane-get.sleep"), seconds.to_string()).unwrap();
     }
 
     fn env(mut self, name: &'static str, value: Option<&str>) -> Shell {
@@ -183,6 +214,16 @@ impl Shell {
         assert!(calls.is_empty(), "expected no herdr calls, got {calls:#?}");
     }
 
+    /// The watcher's note files are all gone once the shell has exited.
+    fn assert_no_marks(&self) {
+        let marks: Vec<_> = fs::read_dir(&self.state.root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().starts_with("zsh-skip"))
+            .collect();
+        assert!(marks.is_empty(), "left behind: {marks:?}");
+    }
+
     fn read_calls(&self) -> Vec<Vec<String>> {
         fs::read_to_string(&self.log)
             .unwrap_or_default()
@@ -202,6 +243,15 @@ fn now_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_micros() as u64
+}
+
+/// The calls that report to Herdr, without the `pane get` queries.
+fn reports(calls: &[Vec<String>]) -> Vec<Vec<String>> {
+    calls.iter().filter(|c| !is_pane_get(c)).cloned().collect()
+}
+
+fn is_pane_get(call: &[String]) -> bool {
+    call.len() > 2 && call[0] == "pane" && call[1] == "get" && call[2] == PANE
 }
 
 fn arg_after<'a>(call: &'a [String], flag: &str) -> Option<&'a str> {
@@ -248,8 +298,14 @@ fn a_long_command_reports_working_then_its_result_then_releases() {
     let shell = Shell::new("zsh_long", CONFIG);
     let before = now_us();
     shell.run(&["sleep 1.6", "true"]);
-    let calls = shell.calls(5);
-    assert_eq!(calls.len(), 5, "{calls:#?}");
+    let calls = shell.calls(6);
+    assert_eq!(calls.len(), 6, "{calls:#?}");
+    assert_eq!(
+        calls.iter().filter(|c| is_pane_get(c)).count(),
+        1,
+        "{calls:#?}"
+    );
+    let calls = reports(&calls);
     for call in &calls {
         assert_eq!(arg_after(call, "--source"), Some(SOURCE), "{call:?}");
         assert!(seq(call) > before, "--seq below the clock: {call:?}");
@@ -298,7 +354,7 @@ fn a_command_typed_at_the_prompt_releases_the_claim() {
         Line("true"),
         Line("sleep 1.6"),
     ]);
-    let calls = shell.calls(10);
+    let calls = shell.calls(12);
     let released = releases(&calls);
     assert_eq!(
         released.len(),
@@ -321,7 +377,7 @@ fn a_command_typed_ahead_keeps_the_claim() {
     // take down, or race, the banner for a command the user walked away from.
     let shell = Shell::new("zsh_typed_ahead", CONFIG);
     shell.run(&["sleep 1.6", "true", "sleep 1.6"]);
-    let calls = shell.calls(9);
+    let calls = shell.calls(11);
     let released = releases(&calls);
     assert_eq!(
         released.len(),
@@ -341,7 +397,7 @@ fn a_command_typed_ahead_keeps_the_claim() {
 fn a_failed_long_command_is_labelled_failed() {
     let shell = Shell::new("zsh_failed", CONFIG);
     shell.run(&["sleep 1.6; false"]);
-    let calls = shell.calls(5);
+    let calls = shell.calls(6);
     let result = find(&calls, "report-metadata", ("--state-label", "idle=failed"));
     assert_eq!(
         arg_after(result, "--title"),
@@ -355,7 +411,7 @@ fn the_shell_exiting_releases_the_claim() {
     // preexec, so only zshexit can release.
     let shell = Shell::new("zsh_exit", CONFIG);
     shell.run(&["sleep 1.6"]);
-    let calls = shell.calls(5);
+    let calls = shell.calls(6);
     let idle = find(&calls, "report-agent", ("--state", "idle"));
     let release = find(&calls, "release-agent", ("--agent", "sleep"));
     assert!(seq(idle) < seq(release));
@@ -451,4 +507,86 @@ fn the_hook_stands_aside_for_herdr_ohmyzsh() {
     let shell = Shell::new("zsh_omz", CONFIG);
     shell.run(&["_herdr_omz_preexec() { }", "sleep 1.3"]);
     shell.assert_no_calls();
+}
+
+#[test]
+fn a_pane_herdr_detected_as_an_agent_is_left_alone() {
+    // Typed as `cursor-agent`, which isn't on the agent list; Herdr knows it
+    // as `cursor`, which is. `sleep` stands in for the program: only the
+    // reply decides.
+    let shell = Shell::new("zsh_detected_alias", CONFIG);
+    shell.answer_pane_get("pane-get-detected-alias");
+    shell.run(&["sleep 1.6", "true"]);
+    let calls = shell.calls(1);
+    assert!(
+        calls.len() == 1 && is_pane_get(&calls[0]),
+        "expected only the pane get, got {calls:#?}"
+    );
+    shell.assert_no_marks();
+}
+
+#[test]
+fn a_pane_an_agent_reports_on_itself_is_left_alone() {
+    // Claude through its own integration: `claude`, with a session.
+    let shell = Shell::new("zsh_agent_reports", CONFIG);
+    shell.answer_pane_get("pane-get-focused");
+    shell.run(&["sleep 1.6"]);
+    let calls = shell.calls(1);
+    assert!(
+        calls.len() == 1 && is_pane_get(&calls[0]),
+        "expected only the pane get, got {calls:#?}"
+    );
+}
+
+#[test]
+fn a_pane_another_shell_command_holds_is_claimed() {
+    // `make`, from another shell or a shell that was killed, isn't an agent.
+    let shell = Shell::new("zsh_other_shell", CONFIG);
+    shell.answer_pane_get("pane-get-unfocused-0.9.1");
+    shell.run(&["sleep 1.6"]);
+    let calls = shell.calls(6);
+    find(&calls, "report-agent", ("--state", "working"));
+    find(&calls, "report-agent", ("--state", "idle"));
+}
+
+#[test]
+fn a_failed_pane_get_still_claims() {
+    let shell = Shell::new("zsh_pane_get_fails", CONFIG);
+    shell.answer_pane_get("pane-get-not-found");
+    shell.run(&["sleep 1.6"]);
+    let calls = shell.calls(6);
+    find(&calls, "report-agent", ("--state", "working"));
+    find(&calls, "report-agent", ("--state", "idle"));
+}
+
+#[test]
+fn a_pane_get_that_never_answers_still_claims_after_two_seconds() {
+    // The reply would say agent, but it comes too late to count.
+    let shell = Shell::new("zsh_pane_get_hangs", CONFIG);
+    shell.answer_pane_get("pane-get-detected-alias");
+    shell.delay_pane_get(10);
+    // The claim comes at about 3 s: the 1 s threshold, then 2 s waiting.
+    let started = Instant::now();
+    shell.run(&["sleep 4.5"]);
+    let calls = shell.calls(6);
+    find(&calls, "report-agent", ("--state", "working"));
+    find(&calls, "report-agent", ("--state", "idle"));
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "zsh waited on pane get"
+    );
+}
+
+#[test]
+fn a_command_that_ends_while_the_hook_is_still_asking_is_not_reported() {
+    // Nothing was claimed, so there's no claim to finish.
+    let shell = Shell::new("zsh_ends_while_asking", CONFIG);
+    shell.delay_pane_get(10);
+    shell.run(&["sleep 1.8"]);
+    shell.assert_no_marks();
+    let calls = shell.calls(1);
+    assert!(
+        calls.len() == 1 && is_pane_get(&calls[0]),
+        "expected only the pane get, got {calls:#?}"
+    );
 }

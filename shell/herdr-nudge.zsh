@@ -6,7 +6,8 @@
 # nothing outside a Herdr pane.
 #
 # A command claims the pane only once it has run for min_seconds: a
-# background watcher reports `working` then. When it finishes, precmd sends
+# background watcher reports `working` then, unless Herdr already has an
+# agent in the pane. When it finishes, precmd sends
 # the title and `idle`. Herdr turns that `idle` into `done` if nobody was
 # looking at the pane, and needs the `working` first to do it. Short
 # commands never call herdr at all. The claim is released by the next
@@ -14,11 +15,14 @@
 
 [[ -n $ZSH_VERSION && $HERDR_ENV == 1 && -n $HERDR_PANE_ID ]] || return 0
 zmodload zsh/datetime zsh/zselect zsh/system 2>/dev/null || return 0
+zmodload -F zsh/files b:zf_rm 2>/dev/null || return 0
 
 # Declared without values so sourcing the file twice keeps a claim we hold.
 typeset -g  _herdr_nudge_bin=${HERDR_BIN_PATH:-herdr}
 typeset -gi _herdr_nudge_min
 typeset -gA _herdr_nudge_skip   # command names we never report
+typeset -gA _herdr_nudge_agents # Herdr's agent labels, also in the skip list
+typeset -g  _herdr_nudge_mark   # start of the watcher's note files' names
 typeset -g  _herdr_nudge_cmd    # label of the command running now, if timed
 typeset -g  _herdr_nudge_title
 typeset -gF _herdr_nudge_start
@@ -33,14 +37,15 @@ function _herdr_nudge_settings {
   emulate -L zsh
   local line key value enabled=0 min=
   [[ -r $1 ]] || return 1
-  _herdr_nudge_skip=()
+  _herdr_nudge_skip=() _herdr_nudge_agents=()
   while IFS= read -r line || [[ -n $line ]]; do
     [[ $line == *=* && $line != \#* ]] || continue
     key=${line%%=*} value=${line#*=}
     case $key in
       enabled) enabled=$value ;;
       min_seconds) min=$value ;;
-      ignore|agent) [[ -n $value ]] && _herdr_nudge_skip[$value]=1 ;;
+      ignore) [[ -n $value ]] && _herdr_nudge_skip[$value]=1 ;;
+      agent) [[ -n $value ]] && _herdr_nudge_skip[$value]=1 _herdr_nudge_agents[$value]=1 ;;
     esac
   done < $1
   [[ $enabled == 1 && $min == <-> ]] || return 1
@@ -62,6 +67,7 @@ if ! _herdr_nudge_settings ${${(%):-%x}:A:h}/shell.env; then
   fi
   return 0
 fi
+_herdr_nudge_mark=${${(%):-%x}:A:h}/zsh-skip.$$
 
 # Herdr drops a report whose --seq isn't above the last one it took from
 # this source for this pane, and it remembers that across shells and
@@ -144,6 +150,31 @@ function _herdr_nudge_release {
   _herdr_nudge_claim=
 }
 
+# True if Herdr already has an agent in this pane. Our skip list has
+# Herdr's agent labels, but people type the aliases Herdr also detects by
+# (`cursor-agent`, `kiro-cli`), and Herdr labels those `cursor` and `kiro`.
+# `pane get` doesn't say who reported a label, so a label that isn't an
+# agent's (`make` from another shell) is taken over as before. No answer
+# within 2 s counts as no agent: a stopped server never answers, and an
+# extra banner is better than a missed one.
+function _herdr_nudge_agent_here {
+  emulate -L zsh
+  local out chunk fd label
+  local -F deadline=$(( EPOCHREALTIME + 2 ))
+  exec {fd}< <("$_herdr_nudge_bin" pane get $HERDR_PANE_ID </dev/null 2>/dev/null)
+  while (( EPOCHREALTIME < deadline )) &&
+      sysread -t $(( deadline - EPOCHREALTIME )) -i $fd chunk; do
+    out+=$chunk
+  done
+  exec {fd}<&-
+  # A quote inside a JSON string is escaped, so this only matches a key.
+  # Herdr's keys come sorted, so the pane's `agent` comes before the one
+  # inside `agent_session`, which is taken only when the pane has none.
+  [[ $out == *'"agent":"'* ]] || return 1
+  label=${${out#*\"agent\":\"}%%\"*}
+  (( $+_herdr_nudge_agents[$label] ))
+}
+
 # Runs in the background from preexec. It stays alive after reporting,
 # until precmd kills it, so the pid precmd kills can't have been reused by
 # some other process in the meantime. It leaves on its own if the shell
@@ -161,6 +192,20 @@ function _herdr_nudge_watch {
   # A shell killed outright runs no zshexit, and a claim made now would
   # never be released.
   (( sysparams[ppid] == $$ )) || return 0
+  # precmd can't see what we decide, so we leave a note for this command
+  # first and take it away only when we claim. Killed while still asking,
+  # we have claimed nothing, and precmd must not finish a claim either.
+  local mark=$_herdr_nudge_mark.$_herdr_nudge_start
+  : >| $mark
+  if ! _herdr_nudge_agent_here; then
+    zf_rm -f $mark && _herdr_nudge_claim_now
+  fi
+  while (( sysparams[ppid] == $$ )); do
+    zselect -t 6000
+  done
+}
+
+function _herdr_nudge_claim_now {
   # The title from the last command outlives a release, so replace it
   # before the claim shows up in Herdr.
   _herdr_nudge_seq
@@ -169,9 +214,6 @@ function _herdr_nudge_watch {
   _herdr_nudge_seq
   _herdr_nudge_herdr pane report-agent $HERDR_PANE_ID --source herdr-nudge-zsh \
     --agent $_herdr_nudge_cmd --state working --seq $REPLY
-  while (( sysparams[ppid] == $$ )); do
-    zselect -t 6000
-  done
 }
 
 function _herdr_nudge_preexec {
@@ -217,6 +259,13 @@ function _herdr_nudge_precmd {
   _herdr_nudge_stop_watcher
   local -F elapsed=$(( EPOCHREALTIME - _herdr_nudge_start ))
   (( elapsed >= _herdr_nudge_min )) || return 0
+  # The watcher's note: it found an agent in the pane, or it died before
+  # it knew. Either way it made no claim, so there's none to finish.
+  local mark=$_herdr_nudge_mark.$_herdr_nudge_start
+  if [[ -e $mark ]]; then
+    zf_rm -f $mark 2>/dev/null
+    return 0
+  fi
 
   local word=done
   (( rc )) && word=failed
@@ -239,6 +288,7 @@ function _herdr_nudge_precmd {
 function _herdr_nudge_zshexit {
   emulate -L zsh
   _herdr_nudge_stop_watcher
+  zf_rm -f $_herdr_nudge_mark.$_herdr_nudge_start 2>/dev/null
   _herdr_nudge_release
 }
 

@@ -309,6 +309,12 @@ class Verify:
         # starts, and fills in the fields about it over a few replies. The
         # capture was made long after. Without a network they stay missing.
         self.cli("agent-manifests", "server", "agent-manifests", "--json", settle=15)
+        # Herdr knows `cursor-agent` only from those remote manifests, so this
+        # waits for them too.
+        detected = self.split(shell)
+        self.herdr("pane", "run", detected, os.path.join(SCRATCH, "bin", "cursor-agent"))
+        self.cli("pane-get-detected-alias", "pane", "get", detected, settle=15)
+        self.cli("pane-get-not-found", "pane", "get", "w99:p1")
 
         # Two clients, one on the session and one that starts its own server,
         # which is what the process captures were made from.
@@ -436,6 +442,11 @@ def setup():
     with open(stand_in, "w") as f:
         f.write("#!/bin/sh\nprintf '\\033]0;verify\\007'\nwhile :; do sleep 1; done\n")
     os.chmod(stand_in, 0o755)
+    # A name Herdr's manifests list as an alias of Cursor, not its label.
+    alias = os.path.join(SCRATCH, "bin", "cursor-agent")
+    with open(alias, "w") as f:
+        f.write("#!/bin/sh\nwhile :; do sleep 1; done\n")
+    os.chmod(alias, 0o755)
 
 
 def teardown(children=()):

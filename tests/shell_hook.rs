@@ -141,6 +141,24 @@ fn install_prefers_the_list_just_fetched_to_the_saved_one() {
 }
 
 #[test]
+fn install_removes_notes_left_by_killed_shells() {
+    let dir = scratch_dir("shell_hook_marks");
+    let state = state_with_agents(&dir);
+    let left = state.root.join("zsh-skip.4242.1790463606.5924210548");
+    fs::write(&left, "").unwrap();
+    let notes = shell_hook::install(&state, None, None, None, &Replay::new([]));
+    assert!(!left.exists(), "note still there, notes: {notes:?}");
+    assert!(
+        notes.iter().any(|n| n.starts_with("removed 1 note")),
+        "{notes:?}"
+    );
+    assert!(
+        state.agents_cache_path().exists(),
+        "removed more than notes"
+    );
+}
+
+#[test]
 fn zshrc_is_read_for_the_hook_however_its_path_is_written() {
     let home = Path::new("/Users/dev");
     let hook = Path::new("/Users/dev/.local/state/herdr/plugins/herdr-nudge/herdr-nudge.zsh");

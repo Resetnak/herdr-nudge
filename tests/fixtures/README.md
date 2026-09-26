@@ -191,6 +191,8 @@ belong to the probe; tests should override them.
 | `cli/pane-get-unfocused-0.9.1` | p | 0.9.1, a pane claimed by `make`: the same fields as 0.9.0 |
 | `cli/pane-get-reported-no-session` | p | a pane claimed by `pane report-agent`: `agent`, `title` and `state_labels`, no `agent_session` |
 | `cli/pane-get-after-release` | p | the same pane after `release-agent`: no `agent`, `unknown` status, `title` and `state_labels` left behind |
+| `cli/pane-get-detected-alias` | p | 0.9.0, throwaway server: a script named `cursor-agent` (an alias in Herdr's manifests) running in the pane. `agent` is `cursor`, Herdr's label, and there is no `agent_session` |
+| `cli/pane-get-not-found` | p | 0.9.0: `pane_not_found` on stderr, exit 1, nothing on stdout |
 | `cli/pane-list` | – | every pane; exactly one has `focused: true` |
 | `cli/plugin-config-dir` | – | where Herdr keeps this plugin's config: a bare path, not JSON |
 | `cli/workspace-get` | – | 0.9.1: a workspace's `label`, which a pane's own environment doesn't carry |
@@ -377,6 +379,37 @@ for an agent session).
     closed panes.** Checked on 0.9.1 with a throwaway plugin that ran it
     from its `tab.closed` and `workspace.closed` hooks, three of each: none
     listed a closed pane. Not kept as a fixture.
+
+## Findings (2026-09-26, agent aliases, both versions)
+
+Throwaway headless servers under a scratch `HOME` in `/tmp`, one per
+version (0.9.0 the downloaded release binary, sha256 checked against
+GitHub's). Stand-in scripts named after the aliases, as `verify.py` does
+for `claude`. Only `cli/pane-get-detected-alias` and
+`cli/pane-get-not-found` are kept; the rest was read from `pane get` and
+isn't a fixture.
+
+21. **Herdr detects an agent by any of its manifest aliases, and labels it
+    with the manifest's id.** `cursor-agent` → `cursor`, `claude-code` →
+    `claude`, `kiro-cli` → `kiro`. The aliases come from the manifests
+    Herdr fetches after it starts (`aliases =` in
+    `agent-detection/remote/*.toml` under its state dir), which
+    `agent-manifests --json` doesn't list. Detection showed up in `pane get`
+    0.1 s after the command started, 0.6 s once on 0.9.0. No
+    `agent_session`: only an integration binds one. A script not named
+    after an agent stayed unlabelled for 12 s.
+22. **`pane get` doesn't say who reported an agent.** A pane a shell hook
+    claimed (`make`) and a pane Herdr detected (`cursor`) have the same
+    fields; only the label differs.
+23. **Whoever labels a pane first keeps the label.** A report from another
+    source on a detected pane changed its status and title, but `agent`
+    stayed `cursor`. The other way round, a detected program started while
+    a report held the pane stayed hidden behind the reported label, and
+    showed up 1.3–1.8 s after that report was released.
+24. **The label goes when the detected program exits**, within 0.1–0.3 s.
+25. **`pane get` against a stopped server never returns.** With the server
+    under SIGSTOP it was still waiting after 40 s, on both versions. With
+    no server at all it fails at once (`server_not_running`, exit 1).
 
 ## Still missing
 

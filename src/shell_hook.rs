@@ -26,6 +26,13 @@ pub const SCRIPT: &str = include_str!("../shell/herdr-nudge.zsh");
 ///
 /// `fetched` is the agent list `--cleanup` just got from Herdr, if it got
 /// one. Without it, the list saved by an earlier run is used.
+///
+/// It also deletes the notes the hook's watcher leaves for its shell
+/// (`zsh-skip.<pid>.<start>`). The shells that wrote them went with the old
+/// server, so any still here were left by a shell killed mid-command. A
+/// second Herdr session shares this directory; a shell of that session
+/// that loses its note reports that one command's finish, as it would
+/// have before the note existed.
 pub fn install<R: Runner>(
     state: &StateDir,
     config_dir: Option<&Path>,
@@ -87,6 +94,8 @@ pub fn install<R: Runner>(
         ));
     }
 
+    remove_marks(state, &mut notes);
+
     let written = state::write_atomic(&state.shell_env_path(), env.as_bytes())
         .and_then(|()| state::write_atomic(&state.shell_hook_path(), SCRIPT.as_bytes()));
     match written {
@@ -97,6 +106,28 @@ pub fn install<R: Runner>(
         Err(e) => notes.push(format!("could not write the zsh hook: {e}")),
     }
     notes
+}
+
+fn remove_marks(state: &StateDir, notes: &mut Vec<String>) {
+    let entries = match fs::read_dir(&state.root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+        Err(e) => {
+            notes.push(format!("could not list the state directory: {e}"));
+            return;
+        }
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with("zsh-skip.")
+            && fs::remove_file(entry.path()).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        notes.push(format!("removed {removed} note(s) left by killed shells"));
+    }
 }
 
 /// `.zshrc`'s text, or nothing if there's no file. A byte that isn't UTF-8

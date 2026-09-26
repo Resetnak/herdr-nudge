@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "herdr",
+    "pane",
+    "get",
+    "w99:p1"
+  ],
+  "captured_at": "2026-09-26T15:49:08",
+  "herdr_version": "herdr 0.9.0",
+  "exit_code": 1,
+  "stdout": "",
+  "stderr": "{\"error\":{\"code\":\"pane_not_found\",\"message\":\"pane w99:p1 not found\"},\"id\":\"cli:pane:get\"}\n"
+}
