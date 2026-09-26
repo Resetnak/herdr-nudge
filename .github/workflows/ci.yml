@@ -1,0 +1,63 @@
+name: CI
+
+# macOS minutes are the expensive kind, so only main and runs started by hand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # One of each because an Intel Mac can't run arm64 code at all, and the
+    # committed binary carries both.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26-intel, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: |
+          uname -m
+          rustc --version
+          cargo --version
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Committed binary
+        run: |
+          set -eu
+          lipo bin/herdr-nudge -verify_arch x86_64 arm64
+          codesign --verify --strict bin/herdr-nudge
+
+          # Runs the half built for this runner, so between the two jobs
+          # both halves have run.
+          got=$(arch "-$(uname -m)" bin/herdr-nudge --version)
+          want="herdr-nudge $(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
+          manifest="herdr-nudge $(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml | head -1)"
+          echo "binary: $got, Cargo.toml: $want, manifest: $manifest"
+          [ "$got" = "$want" ] || { echo "bin/herdr-nudge is not this version; run tools/build-bin.sh"; exit 1; }
+          [ "$manifest" = "$want" ] || { echo "herdr-plugin.toml and Cargo.toml disagree on the version"; exit 1; }
+
+          # build-bin.sh refuses to write a binary with a home path in it;
+          # this catches one built some other way.
+          if strings -a bin/herdr-nudge | grep -E '/Users/|/home/'; then
+            echo "bin/herdr-nudge contains a home path; build it with tools/build-bin.sh"
+            exit 1
+          fi
+
+          # The build is only reproducible on one machine, so this can't
+          # compare bytes. build-bin.sh records a hash of what it built from
+          # instead.
+          tools/build-bin.sh --check

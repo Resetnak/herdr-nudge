@@ -117,8 +117,8 @@ impl std::error::Error for MissingVars {}
 
 /// The plugin's directory, for a command the user runs themselves, which
 /// gets no `HERDR_PLUGIN_ROOT`: the nearest directory above our binary with
-/// Herdr's manifest in it. That covers `target/release/` while developing and
-/// `bin/` once installed.
+/// Herdr's manifest in it. That covers `bin/`, which Herdr runs, and a
+/// binary run by hand from under `target/`.
 pub fn plugin_root_above(binary: &Path) -> Option<PathBuf> {
     binary
         .ancestors()

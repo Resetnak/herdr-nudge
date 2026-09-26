@@ -5,20 +5,19 @@ description = "macOS notifications when an agent or a long shell command needs y
 min_herdr_version = "0.9.0"
 platforms = ["macos"]
 
-# Points at a local release build until there is a shipped binary.
 [[startup]]
-command = ["./target/release/herdr-nudge", "--cleanup"]
+command = ["./bin/herdr-nudge", "--cleanup"]
 
 [[events]]
 on = "pane.agent_status_changed"
-command = ["./target/release/herdr-nudge"]
+command = ["./bin/herdr-nudge"]
 
 [[events]]
 on = "pane.closed"
-command = ["./target/release/herdr-nudge"]
+command = ["./bin/herdr-nudge"]
 
 # Herdr 0.9.1 sends this when the user moves to a pane by hand; 0.9.0 only
 # for focus asked for through the API.
 [[events]]
 on = "pane.focused"
-command = ["./target/release/herdr-nudge"]
+command = ["./bin/herdr-nudge"]
