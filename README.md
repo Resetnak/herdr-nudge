@@ -1,30 +1,38 @@
-# herdr-nudge
+# Herdr Nudge
 
-A [Herdr](https://herdr.dev) plugin for macOS. It sends a notification when an
-AI agent in one of your panes is waiting for you or has finished, or when a
-long shell command ends. Click the notification and Herdr switches to that
-pane and your terminal comes to the front.
+Mac notifications for [Herdr](https://herdr.dev). Know the moment an agent
+needs you or a long command finishes, and click the notification to land on
+that exact pane.
 
-- Agents: a notification when an agent goes `blocked` or `done` (Claude, Codex
-  and the other agents Herdr detects).
-- Shell commands: with the zsh hook, a notification when a command that ran
-  5 seconds or longer finishes, with its exit status and how long it took.
-- Nothing is posted for a pane you're looking at: the pane is focused in
-  Herdr and your terminal is the app in front.
-- A notification goes away by itself when its pane moves on (the agent starts
-  working again, the pane is closed), and on Herdr 0.9.1 when you switch to
-  the pane yourself. Closing a whole tab or workspace doesn't clear it yet.
+![Three notifications at the top right of a Mac desktop: Kilo blocked in the web workspace, Grok done in infra, cargo test failed in api](assets/readme/notifications.jpg)
 
-## Requirements
+```sh
+herdr plugin install justinchiasson/herdr-nudge
+```
 
-- macOS, Apple Silicon or Intel. Tested on macOS 26.
-- Herdr 0.9.0 or later.
-- git, which `herdr plugin install` uses. On a Mac without it, the first
-  `git` run offers to install Apple's Command Line Tools.
-- zsh, only for shell-command notifications.
+macOS only (Apple Silicon or Intel, tested on macOS 26), Herdr 0.9.0 or
+later. Nothing else to install.
 
-Nothing else. The notifier is bundled (terminal-notifier 3.1.0, renamed Herdr
-Nudge so macOS can give it its own notification permission).
+## What it does
+
+- **Agents.** A notification when an agent goes `blocked` (it's waiting for
+  you) or `done`, for the agents Herdr detects: Claude Code, Codex, Kilo,
+  Grok and the rest. Most show their logo.
+- **Long shell commands.** With the zsh hook, a notification when a command
+  that ran 5 seconds or more finishes, with its exit status and how long it
+  took.
+- **Click to go back.** Herdr switches to the pane, in whichever workspace
+  or tab it's in, and your terminal comes to the front.
+- **Quiet when you're watching.** Nothing is posted for the pane you're
+  looking at: focused in Herdr, with your terminal in front.
+- **Cleans up after itself.** A notification goes away when its pane moves
+  on (the agent starts working again, you run another command), or when the
+  pane, its tab or its workspace closes. On Herdr 0.9.1 it also goes when
+  you switch to the pane yourself.
+
+| A test run fails while you're in your editor | Click the notification, and you're at the pane |
+|---|---|
+| ![VS Code in front, with a "cargo failed" notification for the api workspace](assets/readme/click-before.png) | ![Ghostty in front, Herdr on the api workspace, showing the failed test](assets/readme/click-after.png) |
 
 ## Install
 
@@ -32,56 +40,26 @@ Nudge so macOS can give it its own notification permission).
 herdr plugin install justinchiasson/herdr-nudge
 ```
 
-Herdr shows what the plugin will run and asks first. Agent notifications work
-right away. To update, run the same command again. To remove it,
-`herdr plugin uninstall herdr-nudge` (and the `.zshrc` lines, if you added
-them).
+Herdr shows what the plugin will run and asks first. That's it: the next
+time an agent needs you, you get a notification. The first one makes macOS
+ask whether Herdr Nudge may send notifications. Allow it.
 
-Then restart Herdr once, so the plugin's startup hook writes the zsh hook:
-`herdr server stop`, then `herdr`. This stops whatever is running in your
-panes, so pick your moment. You can skip it if you don't want shell-command
-notifications yet.
+If macOS offers to install the Command Line Tools during the install, accept:
+`herdr plugin install` uses `git`, which comes with them.
 
-### Running its commands
+macOS shows a notification for a few seconds, then keeps it in Notification
+Center, clickable for an hour. To keep them on screen until you deal with
+them, set Herdr Nudge's alert style to *Persistent* in System Settings >
+Notifications (*Alerts* on older macOS).
 
-The plugin's commands aren't on your `PATH`. From a shell, this finds the
-installed binary (the path stays the same across updates):
+To update, run the install command again. To remove it, `herdr plugin
+uninstall herdr-nudge` (and the `.zshrc` lines, if you added them).
 
-```sh
-nudge="$(herdr plugin list --plugin herdr-nudge --json | sed -n 's/.*"plugin_root":"\([^"]*\)".*/\1/p')/bin/herdr-nudge"
-[ -x "$nudge" ] || echo "herdr-nudge isn't installed"
-"$nudge" doctor
-```
-
-If you use them often, `echo "$nudge"` and put an alias to that path in your
-`.zshrc`.
-
-### First notification
-
-From a Herdr pane, run `"$nudge" test`. The first notification makes macOS ask
-whether Herdr Nudge may send notifications; allow it. Clicking the test
-notification should bring you back to that pane.
-
-macOS shows banners for about 5 seconds and then moves them to Notification
-Center, where they stay clickable for an hour. To keep them on screen until
-you deal with them, set Herdr Nudge to *Alerts* in System Settings →
-Notifications.
-
-## Shell commands (zsh)
+## Shell commands (optional, zsh)
 
 Herdr tells the plugin about agents by itself, but not about shell commands.
-For those, the plugin writes a small zsh hook each time Herdr starts, and your
-`.zshrc` has to load it. `setup-zsh` shows the lines and the file, and adds
-them only if you say yes:
-
-```sh
-"$nudge" setup-zsh
-```
-
-It writes to `$ZDOTDIR/.zshrc` if `ZDOTDIR` is set, else `~/.zshrc`, and does
-nothing if the lines are already there. To add them by hand instead, this is
-the block for the usual state directory (`doctor` prints the right one for
-yours):
+To get a notification when a long command finishes, add this to your
+`~/.zshrc` (`$ZDOTDIR/.zshrc` if you set `ZDOTDIR`):
 
 ```zsh
 if [[ -r ~/.local/state/herdr/plugins/herdr-nudge/herdr-nudge.zsh ]]; then
@@ -89,53 +67,85 @@ if [[ -r ~/.local/state/herdr/plugins/herdr-nudge/herdr-nudge.zsh ]]; then
 fi
 ```
 
-The hook does nothing outside a Herdr pane. A command that runs for 5 seconds
-or more (`[shell] min_seconds`) gets a notification when it finishes, unless
-you are looking at its pane. Agent CLIs and the commands in
-`[shell] ignore_commands` (editors, pagers, `ssh`, `tmux` and the like) are
-never reported. The notification shows the command line as you typed it, cut
-at 60 characters, so anything secret you put on a long-running command line
-ends up in Notification Center. Settings reach new shells after Herdr
-restarts.
+Then restart Herdr once (`herdr server stop`, then `herdr`), so the plugin
+writes the file those lines load. If you've moved Herdr's state directory
+with `XDG_STATE_HOME`, `doctor` prints the right path for yours.
+
+The hook does nothing outside a Herdr pane. Agents are left to report
+themselves, whatever name you start them by, and so are the commands in
+`[shell] ignore_commands` (editors, pagers, `ssh`, `tmux` and the like),
+since those end when you quit them.
+
+The notification shows the command line as you typed it, cut at 60
+characters, so anything secret you put on a long-running command line ends
+up in Notification Center.
 
 ## Commands
 
+You don't need these day to day. They're for checking your setup and trying
+things out. They aren't on your `PATH`, but this finds them from any shell,
+and the path stays the same across updates:
+
+```sh
+nudge="$(herdr plugin list --plugin herdr-nudge --json | sed -n 's/.*"plugin_root":"\([^"]*\)".*/\1/p')/bin/herdr-nudge"
+[ -x "$nudge" ] || echo "herdr-nudge isn't installed"
+"$nudge" doctor
+```
+
 | Command | What it does |
 |---|---|
-| `doctor` | Checks the things that stop notifications: a config that doesn't load, `[agents] ignore` entries that match nothing, macOS permission and alert style, Herdr's own system toasts (which would double up), and whether `.zshrc` loads the hook. Exits 1 if something is broken. |
-| `test` | Posts an agent-style notification for the pane it runs in. `test --shell` posts a shell-command one. Run it inside a Herdr pane. |
-| `example-config` | Writes `config.toml` with every setting at its default and a note on each. If the file already exists it prints the example instead and leaves your file alone. |
-| `setup-zsh` | Adds the zsh hook to `.zshrc`, after asking. |
+| `doctor` | Checks what stops notifications: a config that doesn't load, `[agents] ignore` entries that match nothing, macOS permission and alert style, Herdr's own system toasts (which would double up), and whether `.zshrc` loads the hook. Exits 1 if something is broken. |
+| `test` | Posts an agent-style notification for the pane it runs in. Switch away and click it to see where it takes you. `test --shell` posts a shell-command one. Run it inside a Herdr pane. |
+| `example-config` | Writes `config.toml` with every setting at its default and a note on each. If the file already exists, it prints the example and leaves your file alone. |
+| `setup-zsh` | Adds the zsh lines above to `.zshrc`, after showing them and asking. Does nothing if they're already there. |
 
 The others (`--cleanup`, `--click`, and no arguments) are what Herdr and the
 notifications run.
 
 ## Configuration
 
-Optional. The file is `config.toml` in the plugin's config directory:
+Settings live in `config.toml`, in the plugin's config directory:
 
 ```sh
 herdr plugin config-dir herdr-nudge
 ```
 
-`example-config` writes it with every key and what it does. The ones people
-change:
+You don't need the file at all. `example-config` writes it with every
+setting at its default and a note on each. These are all of them:
 
 | Key | Default | |
 |---|---|---|
-| `[agents] statuses` | `["blocked", "done"]` | Agent states that notify. |
-| `[agents] ignore` | `[]` | Agents to stay quiet about, by Herdr's label (`"codex"`, not `"Codex"`). |
-| `[shell] min_seconds` | `5` | How long a command runs before it counts. |
-| `[shell] notify_on_failure_only` | `false` | Only failed commands. |
-| `[shell] ignore_commands` | editors, pagers, `ssh`, `tmux`, … | Matched on the command name. A list you set replaces the default one. |
-| `[notifications] sound` | `false` | Herdr plays its own sound for these events; `true` adds ours. |
+| `default_terminal` | unset | Bundle id of the app a click brings forward. Unset, it's the terminal your Herdr client runs in. It's a top-level key, so it goes above the first `[section]`. |
+| `[notifications] clickable_secs` | `3600` | How long a notification can still be clicked in Notification Center, in seconds. |
+| `[notifications] sound` | `false` | Herdr plays its own sound for these events. `true` adds ours. |
 | `[notifications] agent_logos` | `true` | The agent's logo on the right of the notification. |
 | `[notifications] show_workspace` | `true` | The workspace's name under the title. |
-| `default_terminal` | unset | Bundle id of the app a click brings forward. Unset, it's the terminal your Herdr client runs in. It's a top-level key, so it goes above the first `[section]`. |
+| `[agents] enabled` | `true` | Notifications for AI agents. |
+| `[agents] statuses` | `["blocked", "done"]` | Agent states that notify. Any of `idle`, `working`, `blocked`, `done`. |
+| `[agents] ignore` | `[]` | Agents to stay quiet about, by Herdr's label (`"codex"`, not `"Codex"`). |
+| `[shell] enabled` | `true` | Notifications for shell commands. |
+| `[shell] min_seconds` | `5` | How long a command runs before it counts. |
+| `[shell] statuses` | `["idle", "done"]` | Shell states that notify. Herdr turns a finished command's `idle` into `done` when you weren't looking at the pane, so both are there. |
+| `[shell] notify_on_failure_only` | `false` | Only failed commands. |
+| `[shell] ignore_commands` | editors, pagers, `ssh`, `tmux` and more | Commands to stay quiet about, matched on the command name. A list you set replaces the default one. |
+| `[shell] known_agents_extra` | `[]` | Labels to treat as AI agents, whatever Herdr says. Herdr's own agents need no entry. |
+| `[shell] known_agents_remove` | `[]` | Labels to treat as shell commands, whatever Herdr says. |
 
 A key the plugin doesn't know makes it ignore the whole file and use the
-defaults until it's fixed; `doctor` and `herdr plugin log` say so. The
+defaults until it's fixed. `doctor` and `herdr plugin log` say so. The
 `[shell]` settings reach the zsh hook only after Herdr restarts.
+
+## Known limits
+
+- A `done` notification stays up if you come back to its pane by switching
+  apps, with the pane already selected in Herdr. Herdr sends plugins no event
+  for that. It goes when you click it, when the pane changes state again, or
+  after an hour.
+- A click brings your terminal app to the front. If you have several windows
+  of it open, macOS brings forward the one you used last, which may not be
+  the one running Herdr.
+- If you move a pane to another workspace, a notification it already had
+  doesn't clear by itself.
 
 ## Development
 
@@ -147,7 +157,7 @@ upgrade, see `tests/fixtures/README.md`.
 
 ## License
 
-MIT. terminal-notifier is MIT too; its licence is in
+MIT. terminal-notifier is MIT too, and its licence is in
 `vendor/terminal-notifier-LICENSE.md`.
 
 The Herdr logo and the agent logos belong to their owners, and this plugin
