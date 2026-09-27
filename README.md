@@ -285,3 +285,8 @@ and its licence is in
 The Herdr logo and the agent logos belong to their owners, and this plugin
 isn't affiliated with any of them. [NOTICE.md](NOTICE.md) lists where each
 came from.
+
+<img width="2100" height="621" alt="notifications" src="https://github.com/user-attachments/assets/96ab063b-acef-4020-9919-7aa8b00e8a5a" />
+<img width="1200" height="757" alt="click-before" src="https://github.com/user-attachments/assets/c3a04087-a34c-474e-8277-465dd08993e8" />
+<img width="1200" height="757" alt="click-after" src="https://github.com/user-attachments/assets/5f6c5f35-7e83-44e1-aabf-c84f654038c0" />
+https://github.com/user-attachments/assets/41173489-4fc2-46d9-a287-c566a322cad7
