@@ -18,9 +18,9 @@ later. Nothing else to install.
 - **Agents.** A notification when an agent goes `blocked` (it's waiting for
   you) or `done`, for the agents Herdr detects: Claude Code, Codex, Kilo,
   Grok and the rest. Most show their logo.
-- **Long shell commands.** With the zsh hook, a notification when a command
-  that ran 5 seconds or more finishes, with its exit status and how long it
-  took.
+- **Long shell commands.** With the zsh hook, a notification when a long
+  command finishes, with its exit status and how long it took. "Long" means
+  5 seconds or more by default, and is configurable.
 - **Click to go back.** Herdr switches to the pane, in whichever workspace
   or tab it's in, and your terminal comes to the front.
 - **Quiet when you're watching.** Nothing is posted for the pane you're
@@ -47,6 +47,11 @@ ask whether Herdr Nudge may send notifications. Allow it.
 If macOS offers to install the Command Line Tools during the install, accept:
 `herdr plugin install` uses `git`, which comes with them.
 
+If you turned on Herdr's own desktop notifications, turn them off, or you'll
+get two of everything. In `~/.config/herdr/config.toml`, set `delivery` under
+`[ui.toast]` to `"herdr"` (in-app only) or `"off"`, then run `herdr server
+reload-config`. They're off unless you changed it.
+
 macOS shows a notification for a few seconds, then keeps it in Notification
 Center, clickable for an hour. To keep them on screen until you deal with
 them, set Herdr Nudge's alert style to *Persistent* in System Settings >
@@ -68,8 +73,16 @@ fi
 ```
 
 Then restart Herdr once (`herdr server stop`, then `herdr`), so the plugin
-writes the file those lines load. If you've moved Herdr's state directory
-with `XDG_STATE_HOME`, `doctor` prints the right path for yours.
+writes the file those lines load.
+
+Any command that runs for 5 seconds or more counts. To change that, set
+`min_seconds` in the plugin's config file (see
+[Configuration](#configuration)), then restart Herdr:
+
+```toml
+[shell]
+min_seconds = 10
+```
 
 The hook does nothing outside a Herdr pane. Agents are left to report
 themselves, whatever name you start them by, and so are the commands in
@@ -83,13 +96,17 @@ up in Notification Center.
 ## Commands
 
 You don't need these day to day. They're for checking your setup and trying
-things out. They aren't on your `PATH`, but this finds them from any shell,
-and the path stays the same across updates:
+things out. The plugin isn't on your `PATH`, so run it by its path, which
+stays the same across updates:
 
 ```sh
-nudge="$(herdr plugin list --plugin herdr-nudge --json | sed -n 's/.*"plugin_root":"\([^"]*\)".*/\1/p')/bin/herdr-nudge"
-[ -x "$nudge" ] || echo "herdr-nudge isn't installed"
-"$nudge" doctor
+~/.config/herdr/plugins/github/herdr-nudge-*/bin/herdr-nudge doctor
+```
+
+If you use it often, add an alias to your `.zshrc`:
+
+```sh
+alias herdr-nudge='~/.config/herdr/plugins/github/herdr-nudge-*/bin/herdr-nudge'
 ```
 
 | Command | What it does |
@@ -99,8 +116,9 @@ nudge="$(herdr plugin list --plugin herdr-nudge --json | sed -n 's/.*"plugin_roo
 | `example-config` | Writes `config.toml` with every setting at its default and a note on each. If the file already exists, it prints the example and leaves your file alone. |
 | `setup-zsh` | Adds the zsh lines above to `.zshrc`, after showing them and asking. Does nothing if they're already there. |
 
-The others (`--cleanup`, `--click`, and no arguments) are what Herdr and the
-notifications run.
+You may also see the binary run with `--cleanup`, `--click` or no arguments.
+Herdr runs it that way when it starts and on each event, and a notification
+runs it when you click it. You never need to run those yourself.
 
 ## Configuration
 
@@ -110,7 +128,7 @@ Settings live in `config.toml`, in the plugin's config directory:
 herdr plugin config-dir herdr-nudge
 ```
 
-You don't need the file at all. `example-config` writes it with every
+You don't need the file at all. [`example-config`](#commands) writes it with every
 setting at its default and a note on each. These are all of them:
 
 | Key | Default | |
@@ -132,8 +150,110 @@ setting at its default and a note on each. These are all of them:
 | `[shell] known_agents_remove` | `[]` | Labels to treat as shell commands, whatever Herdr says. |
 
 A key the plugin doesn't know makes it ignore the whole file and use the
-defaults until it's fixed. `doctor` and `herdr plugin log` say so. The
+defaults until it's fixed. [`doctor`](#commands) says so. The
 `[shell]` settings reach the zsh hook only after Herdr restarts.
+
+## FAQ
+
+**Do I need to install anything else?**
+No. Notifications are posted by
+[terminal-notifier](https://github.com/julienXX/terminal-notifier), which
+ships inside the plugin as an app called Herdr Nudge, for both Apple Silicon
+and Intel Macs. The one thing `herdr plugin install` needs is `git`. If macOS offers
+to install the Command Line Tools during the install, accept.
+
+**Which agents does it work with?**
+Any agent Herdr detects, such as Claude Code, Codex, Kilo, Grok, Gemini and
+Cursor. Most show their logo. `agent_logos = false` in the
+[config](#configuration) turns the logos off.
+
+**Which terminals does it work with?**
+It's tested with Ghostty. A click brings forward the app your Herdr client
+runs in, so other Mac terminals should work the same way. If a click brings
+up the wrong app, see [Troubleshooting](#troubleshooting).
+
+**Do I have to use zsh?**
+Only for shell-command notifications. Agent notifications work whatever
+shell you use.
+
+**Can I change how long a command has to run, which states notify, the
+sound, or the logos?**
+Yes. Every setting is in the [Configuration](#configuration) table.
+
+**Why didn't I get a notification for the pane I was looking at?**
+That's on purpose. If the pane is focused in Herdr and your terminal is the
+app in front, you're already watching it. Switch to another pane or app and
+you'll get one.
+
+**Does it send anything over the network?**
+No. It only talks to Herdr and to macOS's notification service.
+
+**Does it slow Herdr down?**
+No. Herdr doesn't wait for plugins, and each event takes the plugin well
+under a second.
+
+**Does it work on Linux or Windows?**
+No, it's macOS only.
+
+## Troubleshooting
+
+Start with [`doctor`](#commands). It checks
+most of what's below and says what to fix.
+
+**No notifications at all**
+- Check that macOS allows them: System Settings > Notifications > Herdr
+  Nudge, with notifications allowed.
+- A Focus mode, such as Do Not Disturb, hides them.
+- While you share or record your screen, macOS hides notifications unless
+  "Allow notifications when mirroring or sharing the display" is on in
+  System Settings > Notifications.
+- Nothing is posted for the pane you're looking at (see the [FAQ](#faq)).
+
+**Agent notifications work, but shell commands don't**
+- Check that `.zshrc` has the lines from
+  [Shell commands](#shell-commands-optional-zsh), and that you've restarted
+  Herdr with `herdr server stop`, then `herdr` since installing. Shells that
+  were already open don't have the hook until you open a new one.
+- The command has to run for at least `min_seconds` (5 by default).
+- Commands in `ignore_commands` (editors, pagers, `ssh` and the like) never
+  notify, and with `notify_on_failure_only = true` only failed ones do.
+
+**I received a notification for a command that was waiting on me, like 
+`git commit`**
+The hook times the whole command, and your editor was open for longer than
+5 seconds. Raise `min_seconds`, or add the command to `ignore_commands`.
+That matches on the command's name alone, so `"git"` silences every git
+command.
+
+**Every event notifies twice**
+Herdr's own desktop notifications are on as well. [Install](#install) says
+how to turn them off.
+
+**Clicking brings up the wrong window, tab or app**
+A click brings your terminal to the front, but it can't pick the window or
+tab yet. macOS brings forward the window you used last, with whatever tab it
+was showing. If it's the wrong app entirely, set `default_terminal` to
+your terminal's bundle id, which this prints (Ghostty as the example):
+
+```sh
+osascript -e 'id of app "Ghostty"'
+```
+
+**Clicking a notification does nothing**
+It's older than `clickable_secs` (an hour by default).
+
+**Notifications disappear too quickly**
+Set Herdr Nudge's alert style to *Persistent* in System Settings >
+Notifications.
+
+**My settings have no effect**
+A key the plugin doesn't know, such as a typo, makes it ignore the whole
+file. [`doctor`](#commands) points at the line. `[shell]` settings only reach the hook
+after Herdr restarts. `default_terminal` has to go above the first
+`[section]`.
+
+If you're still stuck, open an issue with the output of [`doctor`](#commands) and of
+`herdr plugin log list --plugin herdr-nudge --limit 20`.
 
 ## Known limits
 
@@ -141,9 +261,9 @@ defaults until it's fixed. `doctor` and `herdr plugin log` say so. The
   apps, with the pane already selected in Herdr. Herdr sends plugins no event
   for that. It goes when you click it, when the pane changes state again, or
   after an hour.
-- A click brings your terminal app to the front. If you have several windows
-  of it open, macOS brings forward the one you used last, which may not be
-  the one running Herdr.
+- A click brings your terminal app to the front, but not the window or tab
+  running Herdr. With several windows open, macOS brings forward the one you
+  used last. With several tabs, the one that was showing stays showing.
 - If you move a pane to another workspace, a notification it already had
   doesn't clear by itself.
 
@@ -157,8 +277,11 @@ upgrade, see `tests/fixtures/README.md`.
 
 ## License
 
-MIT. terminal-notifier is MIT too, and its licence is in
-`vendor/terminal-notifier-LICENSE.md`.
+MIT, see [LICENSE](LICENSE).
+[terminal-notifier](https://github.com/julienXX/terminal-notifier) is MIT too,
+and its licence is in
+[vendor/terminal-notifier-LICENSE.md](vendor/terminal-notifier-LICENSE.md).
 
 The Herdr logo and the agent logos belong to their owners, and this plugin
-isn't affiliated with any of them. `NOTICE.md` lists where each came from.
+isn't affiliated with any of them. [NOTICE.md](NOTICE.md) lists where each
+came from.
