@@ -1,11 +1,11 @@
-//! The logos in `icons/agents/` against the rules the code and NOTICE.md
+//! The logos in `assets/agents/` against the rules the code and NOTICE.md
 //! rely on. A file that breaks one would be silently unused, or shipped
 //! with no record of whose it is.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use herdr_nudge::handler::is_logo_label;
+use herdr_nudge::handler::{LOGO_DIR, is_logo_label};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -26,7 +26,7 @@ fn pngs(dir: &Path) -> Vec<String> {
 
 #[test]
 fn every_logo_is_a_png_named_after_a_plain_label() {
-    let icons = root().join("icons/agents");
+    let icons = root().join(LOGO_DIR);
     for dir in [icons.clone(), icons.join("dark")] {
         for name in pngs(&dir) {
             let label = name
@@ -50,12 +50,12 @@ fn every_logo_is_a_png_named_after_a_plain_label() {
 /// The dark copy is only looked for once the light one is found.
 #[test]
 fn every_dark_logo_has_a_light_one() {
-    let icons = root().join("icons/agents");
+    let icons = root().join(LOGO_DIR);
     let light = pngs(&icons);
     for name in pngs(&icons.join("dark")) {
         assert!(
             light.contains(&name),
-            "icons/agents/dark/{name} has no icons/agents/{name}"
+            "{LOGO_DIR}/dark/{name} has no {LOGO_DIR}/{name}"
         );
     }
 }
@@ -63,15 +63,15 @@ fn every_dark_logo_has_a_light_one() {
 #[test]
 fn every_shipped_image_is_in_the_notice() {
     let notice = fs::read_to_string(root().join("NOTICE.md")).expect("read NOTICE.md");
-    let icons = root().join("icons/agents");
+    let icons = root().join(LOGO_DIR);
     let mut shipped: Vec<String> = pngs(&icons)
         .into_iter()
-        .map(|n| format!("icons/agents/{n}"))
+        .map(|n| format!("{LOGO_DIR}/{n}"))
         .collect();
     shipped.extend(
         pngs(&icons.join("dark"))
             .into_iter()
-            .map(|n| format!("icons/agents/dark/{n}")),
+            .map(|n| format!("{LOGO_DIR}/dark/{n}")),
     );
     shipped.push("assets/herdr-logo.png".to_owned());
     for path in shipped {

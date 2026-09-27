@@ -835,7 +835,11 @@ fn delete_job(state: &StateDir, id: &JobId, notes: &mut Vec<String>) {
     }
 }
 
-/// Whether a label can name a file in `icons/agents/`.
+/// Where the agent logos are, from the plugin root. `tools/fetch-icons.sh`
+/// writes them there.
+pub const LOGO_DIR: &str = "assets/agents";
+
+/// Whether a label can name a file in [`LOGO_DIR`].
 ///
 /// The label reaches us from Herdr or from a shell hook and becomes part of
 /// a path, so a `/` or a `..` in one must not point somewhere else.
@@ -863,7 +867,7 @@ fn logo_for<R: Runner, S: Spawner>(
     if !is_logo_label(label) {
         return None;
     }
-    let icons = deps.plugin_root.join("icons/agents");
+    let icons = deps.plugin_root.join(LOGO_DIR);
     let file = format!("{label}.png");
     let light = icons.join(&file);
     if !light.is_file() {

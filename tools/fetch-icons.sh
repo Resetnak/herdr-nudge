@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rebuilds icons/agents/ from pinned sources: the agent logos shown on the
+# Rebuilds assets/agents/ from pinned sources: the agent logos shown on the
 # right of a banner. NOTICE.md records where each one came from and whose
 # mark it is; keep the two in step.
 #
@@ -75,7 +75,7 @@ done
 [ -f "$xai_zip" ] || die "$xai_zip not found"
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-out="$root/icons/agents"
+out="$root/assets/agents"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/herdr-nudge-icons.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -136,4 +136,4 @@ for path in "$out"/*.png "$out"/dark/*.png; do
     fi
 done
 [ "$stale" -eq 0 ] || die "update NOTICE.md for the files above"
-echo "icons/agents rebuilt; NOTICE.md matches every file"
+echo "assets/agents rebuilt; NOTICE.md matches every file"

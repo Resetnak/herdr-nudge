@@ -157,14 +157,14 @@ fn a_logo_and_a_sound_are_added_only_when_asked_for() {
         "no image or sound by default: {bare:?}"
     );
 
-    let logo = PathBuf::from("/plugins/icons/agents/claude.png");
+    let logo = PathBuf::from("/plugins/assets/agents/claude.png");
     let mut post = post_with("t", "m", execute);
     post.content_image = Some(&logo);
     post.sound = true;
     let full = post_args(&post);
     assert_eq!(
         Spy::arg_after(&full, "-contentImage").as_deref(),
-        Some("/plugins/icons/agents/claude.png"),
+        Some("/plugins/assets/agents/claude.png"),
         "the agent logo goes in -contentImage"
     );
     assert_eq!(

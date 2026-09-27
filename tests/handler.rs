@@ -705,7 +705,7 @@ fn every_captured_event_is_handled_without_panicking() {
     }
 }
 
-/// A label that would climb out of the icons directory is not used as a path.
+/// A label that would climb out of the logos directory is not used as a path.
 #[test]
 fn a_strange_agent_label_gets_no_logo() {
     let harness = Harness::answering("strange_label", "w1:p1", "pane-get-unfocused");
@@ -726,11 +726,11 @@ fn a_strange_agent_label_gets_no_logo() {
     );
 }
 
-/// Puts `icons/agents/<label>.png`, and `dark/<label>.png` if asked, in the
+/// Puts `assets/agents/<label>.png`, and `dark/<label>.png` if asked, in the
 /// harness's plugin, and returns both paths.
 fn install_logo(harness: &Harness, label: &str, with_dark: bool) -> (PathBuf, PathBuf) {
-    let icons = harness.plugin_root.join("icons/agents");
-    fs::create_dir_all(icons.join("dark")).expect("icons dir");
+    let icons = harness.plugin_root.join(handler::LOGO_DIR);
+    fs::create_dir_all(icons.join("dark")).expect("logos dir");
     let light = icons.join(format!("{label}.png"));
     let dark = icons.join("dark").join(format!("{label}.png"));
     fs::write(&light, b"light").expect("light logo");
@@ -761,7 +761,7 @@ fn asked_appearance(harness: &Harness) -> bool {
 fn an_agent_with_no_logo_file_posts_without_one() {
     let harness = Harness::answering("no_logo_file", "w1:p1", "pane-get-unfocused");
     harness.remember_agents(&["claude"]);
-    assert_eq!(posted_logo(&harness), None, "no icons/agents/claude.png");
+    assert_eq!(posted_logo(&harness), None, "no assets/agents/claude.png");
     assert!(
         !asked_appearance(&harness),
         "asked for the appearance with no logo"
@@ -794,7 +794,7 @@ fn a_logo_with_a_dark_copy_follows_light_mode() {
     assert_eq!(
         posted_logo(&harness),
         Some(light.display().to_string()),
-        "sys/defaults-appearance-light should pick icons/agents/claude.png"
+        "sys/defaults-appearance-light should pick assets/agents/claude.png"
     );
     assert!(asked_appearance(&harness), "never asked for the appearance");
 }
@@ -809,7 +809,7 @@ fn a_logo_with_a_dark_copy_follows_dark_mode() {
     assert_eq!(
         posted_logo(&harness),
         Some(dark.display().to_string()),
-        "sys/defaults-appearance-dark should pick icons/agents/dark/claude.png"
+        "sys/defaults-appearance-dark should pick assets/agents/dark/claude.png"
     );
 }
 
