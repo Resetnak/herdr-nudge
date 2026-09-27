@@ -16,9 +16,11 @@ as no raw log gains or loses a line. What Herdr wrote is never edited. Lines
 written by tools/probe/mark.sh are kept as "#mark" records and attached to the
 fixtures that follow them; those notes are ours and may be reworded.
 """
+import getpass
 import json
 import os
 import re
+import socket
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,7 +39,15 @@ HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.local/bin/her
 # two fixtures referring to one session still agree. Deliberately NOT redacted:
 # pane/workspace ids, timestamps, and terminal titles naming this project's own
 # work — they are fixture content, and notifications are composed from them.
-REDACTIONS = [("justinchiasson", "dev"), ("Justins-MacBook-Pro", "dev-mac")]
+# Read from the machine at run time, so the names never appear in this file.
+REDACTIONS = [
+    (real, fake)
+    for real, fake in [
+        (getpass.getuser(), "dev"),
+        (socket.gethostname().split(".")[0], "dev-mac"),
+    ]
+    if real and real != fake
+]
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 PLACEHOLDER = "00000000-0000-4000-8000-%012d"
 

@@ -35,8 +35,8 @@ pub struct Config {
 #[serde(default, deny_unknown_fields)]
 pub struct Notifications {
     /// How long a notification can still be clicked from Notification
-    /// Center. How long a banner stays on screen is the user's macOS
-    /// Banners/Alerts setting, not something we control.
+    /// Center. How long a banner stays on screen is the user's macOS alert
+    /// style (Temporary or Persistent), not something we control.
     pub clickable_secs: u64,
     /// Off by default because Herdr usually plays its own sound for the
     /// same `blocked` or `done`, a moment after the banner, so both on means
@@ -322,7 +322,8 @@ pub fn example() -> String {
 
 [notifications]
 # How long a notification can still be clicked in Notification Center.
-# How long a banner stays on screen is macOS's Banners/Alerts setting.
+# How long a banner stays on screen is macOS's alert style for Herdr Nudge:
+# Temporary or Persistent (Banners or Alerts on older macOS).
 clickable_secs = {clickable_secs}
 # Herdr usually plays its own sound for the same event; true adds ours.
 sound = {sound}

@@ -234,7 +234,8 @@ fn check_notifier(report: &mut Report, runner: &impl Runner, root: Option<&Path>
             Level::Note,
             format!(
                 "banners slide away after a few seconds and wait in Notification Center.\n\
-                 To keep them on screen, choose Alerts in {settings}."
+                 To keep them on screen, set the alert style to Persistent (Alerts on\n\
+                 older macOS) in {settings}."
             ),
         ),
         Some("none") => report.add(
