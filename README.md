@@ -4,7 +4,7 @@ Mac notifications for [Herdr](https://herdr.dev). Know the moment an agent
 needs you or a long command finishes, and click the notification to land on
 that exact pane.
 
-![Three notifications at the top right of a Mac desktop: Kilo blocked in the web workspace, Grok done in infra, cargo test failed in api](assets/readme/notifications.jpg)
+![Three notifications at the top right of a Mac desktop: Kilo blocked in the web workspace, Grok done in infra, cargo test failed in api](https://github.com/user-attachments/assets/96ab063b-acef-4020-9919-7aa8b00e8a5a)
 
 ```sh
 herdr plugin install justinchiasson/herdr-nudge
@@ -12,6 +12,10 @@ herdr plugin install justinchiasson/herdr-nudge
 
 macOS only (Apple Silicon or Intel, tested on macOS 26), Herdr 0.9.0 or
 later. Nothing else to install.
+
+An agent needs you, you click, and you're at its prompt:
+
+<video src="https://github.com/user-attachments/assets/41173489-4fc2-46d9-a287-c566a322cad7" controls muted></video>
 
 ## What it does
 
@@ -32,7 +36,7 @@ later. Nothing else to install.
 
 | A test run fails while you're in your editor | Click the notification, and you're at the pane |
 |---|---|
-| ![VS Code in front, with a "cargo failed" notification for the api workspace](assets/readme/click-before.png) | ![Ghostty in front, Herdr on the api workspace, showing the failed test](assets/readme/click-after.png) |
+| ![VS Code in front, with a "cargo failed" notification for the api workspace](https://github.com/user-attachments/assets/c3a04087-a34c-474e-8277-465dd08993e8) | ![Ghostty in front, Herdr on the api workspace, showing the failed test](https://github.com/user-attachments/assets/5f6c5f35-7e83-44e1-aabf-c84f654038c0) |
 
 ## Install
 
@@ -285,8 +289,3 @@ and its licence is in
 The Herdr logo and the agent logos belong to their owners, and this plugin
 isn't affiliated with any of them. [NOTICE.md](NOTICE.md) lists where each
 came from.
-
-<img width="2100" height="621" alt="notifications" src="https://github.com/user-attachments/assets/96ab063b-acef-4020-9919-7aa8b00e8a5a" />
-<img width="1200" height="757" alt="click-before" src="https://github.com/user-attachments/assets/c3a04087-a34c-474e-8277-465dd08993e8" />
-<img width="1200" height="757" alt="click-after" src="https://github.com/user-attachments/assets/5f6c5f35-7e83-44e1-aabf-c84f654038c0" />
-https://github.com/user-attachments/assets/41173489-4fc2-46d9-a287-c566a322cad7

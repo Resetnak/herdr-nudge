@@ -12,8 +12,8 @@ about your Herdr session. The files are unmodified copies of the sources
 listed. Some logos have a second file in `assets/agents/dark/` for dark mode,
 taken from the same source.
 
-The screenshots in `assets/readme/` are of real notifications, so they show
-the Herdr logo and the Kilo and Grok logos as a notification does.
+The screenshots and video in `README.md` are of real notifications, so they
+show the Herdr logo and the Kilo and Grok logos as a notification does.
 
 If you own one of these marks and want it taken out, open an issue at
 <https://github.com/justinchiasson/herdr-nudge/issues> and it will be removed.
