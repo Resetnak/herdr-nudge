@@ -299,6 +299,12 @@ impl Replay {
         Replay::new([recorded])
     }
 
+    /// Adds a recording, played back under its own argv.
+    pub fn with(mut self, recorded: Recorded) -> Replay {
+        self.recordings.push(recorded);
+        self
+    }
+
     pub fn call_count(&self) -> usize {
         self.calls.borrow().len()
     }

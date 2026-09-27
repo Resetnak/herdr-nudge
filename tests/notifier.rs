@@ -18,7 +18,7 @@ fn job() -> JobId {
 fn post_with<'a>(title: &'a str, message: &'a str, execute: &'a str) -> Post<'a> {
     Post {
         title,
-        subtitle: "w1",
+        subtitle: Some("w1"),
         message,
         group: "herdr-nudge-w1:p1",
         content_image: None,
@@ -133,6 +133,18 @@ fn the_execute_value_matches_the_template_exactly() {
         id.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
         "the job id is lowercase hex: {id}"
+    );
+}
+
+#[test]
+fn no_subtitle_leaves_the_flag_out() {
+    let execute = "'/bin/x' --click 0123456789abcdef";
+    let mut post = post_with("t", "m", execute);
+    post.subtitle = None;
+    let args = post_args(&post);
+    assert!(
+        !args.iter().any(|a| a == "-subtitle"),
+        "subtitle None: {args:?}"
     );
 }
 

@@ -276,12 +276,17 @@ pub fn test<R: Runner, S: Spawner>(deps: &Deps<R, S>, pane_id: &str, kind: PaneK
             return Report { outcome, notes };
         }
     };
-    let label = match cli.workspace_label(&workspace_id) {
-        Ok(label) => label,
-        Err(e) => {
-            notes.push(format!("workspace get {workspace_id}: {e}"));
-            None
+    // Only the subtitle uses the label, so with it off there's nothing to ask.
+    let label = if deps.config.notifications.show_workspace {
+        match cli.workspace_label(&workspace_id) {
+            Ok(label) => label,
+            Err(e) => {
+                notes.push(format!("workspace get {workspace_id}: {e}"));
+                None
+            }
         }
+    } else {
+        None
     };
 
     let event = test_event(pane_id, &workspace_id, kind);
@@ -622,20 +627,27 @@ fn post<R: Runner, S: Spawner>(
         ),
     };
 
+    // Before the job is written: it can run `defaults`, and a job waiting
+    // on disk with no banner yet is one a concurrent hook can delete first.
+    let image = logo_for(deps, kind, agent_label);
+
     // Written before anything is on screen, because a banner can be clicked
     // the moment it appears and a click with no job file does nothing.
     if let Err(e) = deps.state.save_job(&job) {
         return Err(Outcome::Failed(format!("could not write job: {e}")));
     }
 
-    let image = logo_for(deps, kind, agent_label);
     let notifier = Notifier {
         binary: deps.notifier_bin,
         spawner: deps.spawner,
     };
     let post = Post {
         title: &content.title,
-        subtitle: &content.subtitle,
+        subtitle: deps
+            .config
+            .notifications
+            .show_workspace
+            .then_some(content.subtitle.as_str()),
         message: &content.message,
         group: &group,
         content_image: image.as_deref(),
@@ -823,6 +835,18 @@ fn delete_job(state: &StateDir, id: &JobId, notes: &mut Vec<String>) {
     }
 }
 
+/// Whether a label can name a file in `icons/agents/`.
+///
+/// The label reaches us from Herdr or from a shell hook and becomes part of
+/// a path, so a `/` or a `..` in one must not point somewhere else.
+pub fn is_logo_label(label: &str) -> bool {
+    !label.is_empty()
+        && !label.starts_with('.')
+        && label
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'))
+}
+
 /// The agent's logo for the right of the banner, if we have one.
 ///
 /// A missing file is never an error — the banner then shows the Herdr icon
@@ -836,19 +860,22 @@ fn logo_for<R: Runner, S: Spawner>(
         return None;
     }
     let label = agent_label?;
-    // The label reaches us from Herdr or from a shell hook and becomes part
-    // of a path, so a `/` or a `..` in one must not point somewhere else.
-    let plain = !label.is_empty()
-        && !label.starts_with('.')
-        && label
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
-    if !plain {
+    if !is_logo_label(label) {
         return None;
     }
-    let path = deps
-        .plugin_root
-        .join("icons/agents")
-        .join(format!("{label}.png"));
-    path.is_file().then_some(path)
+    let icons = deps.plugin_root.join("icons/agents");
+    let file = format!("{label}.png");
+    let light = icons.join(&file);
+    if !light.is_file() {
+        return None;
+    }
+    // The banner's background shows through a logo's transparent parts, so a
+    // black logo vanishes in dark mode and a white one in light mode. Logos
+    // with that problem ship a second file for dark mode, and only those
+    // cost the appearance query.
+    let dark = icons.join("dark").join(&file);
+    if dark.is_file() && notifier::dark_mode(deps.runner) {
+        return Some(dark);
+    }
+    Some(light)
 }

@@ -726,6 +726,106 @@ fn a_strange_agent_label_gets_no_logo() {
     );
 }
 
+/// Puts `icons/agents/<label>.png`, and `dark/<label>.png` if asked, in the
+/// harness's plugin, and returns both paths.
+fn install_logo(harness: &Harness, label: &str, with_dark: bool) -> (PathBuf, PathBuf) {
+    let icons = harness.plugin_root.join("icons/agents");
+    fs::create_dir_all(icons.join("dark")).expect("icons dir");
+    let light = icons.join(format!("{label}.png"));
+    let dark = icons.join("dark").join(format!("{label}.png"));
+    fs::write(&light, b"light").expect("light logo");
+    if with_dark {
+        fs::write(&dark, b"dark").expect("dark logo");
+    }
+    (light, dark)
+}
+
+fn posted_logo(harness: &Harness) -> Option<String> {
+    assert!(
+        matches!(harness.handle("agent/blocked"), Outcome::Posted(_)),
+        "agent/blocked should post"
+    );
+    Spy::arg_after(&harness.spy.only(), "-contentImage")
+}
+
+fn asked_appearance(harness: &Harness) -> bool {
+    harness
+        .runner
+        .calls
+        .borrow()
+        .iter()
+        .any(|call| call[0].ends_with("/defaults"))
+}
+
+#[test]
+fn an_agent_with_no_logo_file_posts_without_one() {
+    let harness = Harness::answering("no_logo_file", "w1:p1", "pane-get-unfocused");
+    harness.remember_agents(&["claude"]);
+    assert_eq!(posted_logo(&harness), None, "no icons/agents/claude.png");
+    assert!(
+        !asked_appearance(&harness),
+        "asked for the appearance with no logo"
+    );
+}
+
+#[test]
+fn a_logo_with_no_dark_copy_is_used_without_asking_the_appearance() {
+    let harness = Harness::answering("logo_light_only", "w1:p1", "pane-get-unfocused");
+    harness.remember_agents(&["claude"]);
+    let (light, _) = install_logo(&harness, "claude", false);
+    assert_eq!(
+        posted_logo(&harness),
+        Some(light.display().to_string()),
+        "-contentImage for claude with one file"
+    );
+    assert!(
+        !asked_appearance(&harness),
+        "ran defaults for a logo that has no dark copy"
+    );
+}
+
+#[test]
+fn a_logo_with_a_dark_copy_follows_light_mode() {
+    let mut harness = Harness::answering("logo_light_mode", "w1:p1", "pane-get-unfocused");
+    harness.runner =
+        std::mem::take(&mut harness.runner).with(Recorded::sys("defaults-appearance-light"));
+    harness.remember_agents(&["claude"]);
+    let (light, _) = install_logo(&harness, "claude", true);
+    assert_eq!(
+        posted_logo(&harness),
+        Some(light.display().to_string()),
+        "sys/defaults-appearance-light should pick icons/agents/claude.png"
+    );
+    assert!(asked_appearance(&harness), "never asked for the appearance");
+}
+
+#[test]
+fn a_logo_with_a_dark_copy_follows_dark_mode() {
+    let mut harness = Harness::answering("logo_dark_mode", "w1:p1", "pane-get-unfocused");
+    harness.runner =
+        std::mem::take(&mut harness.runner).with(Recorded::sys("defaults-appearance-dark"));
+    harness.remember_agents(&["claude"]);
+    let (_, dark) = install_logo(&harness, "claude", true);
+    assert_eq!(
+        posted_logo(&harness),
+        Some(dark.display().to_string()),
+        "sys/defaults-appearance-dark should pick icons/agents/dark/claude.png"
+    );
+}
+
+/// If `defaults` can't be run, the light file still goes up.
+#[test]
+fn a_failed_appearance_query_uses_the_light_logo() {
+    let harness = Harness::answering("logo_no_defaults", "w1:p1", "pane-get-unfocused");
+    harness.remember_agents(&["claude"]);
+    let (light, _) = install_logo(&harness, "claude", true);
+    assert_eq!(
+        posted_logo(&harness),
+        Some(light.display().to_string()),
+        "-contentImage when defaults has no recording"
+    );
+}
+
 #[test]
 fn job_ids_are_sixteen_hex_and_differ_between_events() {
     let mut seen = BTreeSet::new();
@@ -1634,6 +1734,45 @@ fn test_without_a_workspace_label_uses_the_id() {
             .any(|n| n.contains("workspace_not_found")),
         "{:?}",
         report.notes
+    );
+}
+
+#[test]
+fn test_with_show_workspace_off_has_no_subtitle_and_asks_nothing() {
+    let mut harness = test_harness("test_no_workspace", "workspace-get");
+    harness.config.notifications.show_workspace = false;
+
+    let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
+    assert!(matches!(report.outcome, Outcome::Posted(_)), "{report:?}");
+    let argv = harness.spy.only();
+    assert!(
+        !argv.iter().any(|a| a == "-subtitle"),
+        "show_workspace = false still sent -subtitle: {argv:?}"
+    );
+    assert!(
+        !harness
+            .runner
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call[1..].starts_with(&["workspace".to_owned()])),
+        "show_workspace = false still ran workspace get"
+    );
+}
+
+#[test]
+fn an_event_with_show_workspace_off_has_no_subtitle() {
+    let mut harness = Harness::answering("event_no_workspace", "w1:p1", "pane-get-unfocused");
+    harness.config.notifications.show_workspace = false;
+    harness.remember_agents(&["claude"]);
+    assert!(matches!(
+        harness.handle("agent/blocked"),
+        Outcome::Posted(_)
+    ));
+    let argv = harness.spy.only();
+    assert!(
+        !argv.iter().any(|a| a == "-subtitle"),
+        "agent/blocked with show_workspace = false: {argv:?}"
     );
 }
 

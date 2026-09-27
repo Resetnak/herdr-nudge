@@ -14,11 +14,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::cli::JobId;
-use crate::process::Spawner;
+use crate::process::{Runner, Spawner};
 
 /// Where the bundle sits inside the plugin, and the binary inside the bundle.
 const BUNDLE: &str = "vendor/HerdrNudge.app";
 const BINARY: &str = "Contents/MacOS/terminal-notifier";
+const DEFAULTS: &str = "/usr/bin/defaults";
 
 pub fn bundle_path(plugin_root: &Path) -> PathBuf {
     plugin_root.join(BUNDLE)
@@ -26,6 +27,18 @@ pub fn bundle_path(plugin_root: &Path) -> PathBuf {
 
 pub fn binary_path(plugin_root: &Path) -> PathBuf {
     bundle_path(plugin_root).join(BINARY)
+}
+
+/// Whether macOS is in dark mode right now.
+///
+/// `defaults` prints `Dark` in dark mode and fails in light mode, because
+/// the key is only there while dark (`tests/fixtures/sys/defaults-appearance-*`).
+/// A banner keeps the logo it was posted with, so after a switch the older
+/// ones in Notification Center have the file for the old appearance.
+pub fn dark_mode<R: Runner>(runner: &R) -> bool {
+    runner
+        .run(Path::new(DEFAULTS), &["read", "-g", "AppleInterfaceStyle"])
+        .is_ok_and(|out| out.success() && out.stdout.trim() == "Dark")
 }
 
 /// Notifications for the same pane share a group, so a newer one replaces the
@@ -40,7 +53,8 @@ pub fn group_for(pane_id: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Post<'a> {
     pub title: &'a str,
-    pub subtitle: &'a str,
+    /// None leaves the line out, and the banner has two lines, not three.
+    pub subtitle: Option<&'a str>,
     pub message: &'a str,
     pub group: &'a str,
     /// The agent's logo, shown on the right of the banner. The left icon is
@@ -100,8 +114,6 @@ pub fn post_args(post: &Post) -> Vec<String> {
     let mut args = vec![
         "-title".to_owned(),
         post.title.to_owned(),
-        "-subtitle".to_owned(),
-        post.subtitle.to_owned(),
         "-message".to_owned(),
         post.message.to_owned(),
         "-group".to_owned(),
@@ -109,6 +121,10 @@ pub fn post_args(post: &Post) -> Vec<String> {
         "-execute".to_owned(),
         post.execute.to_owned(),
     ];
+    if let Some(subtitle) = post.subtitle {
+        args.push("-subtitle".to_owned());
+        args.push(subtitle.to_owned());
+    }
     if let Some(image) = post.content_image {
         args.push("-contentImage".to_owned());
         args.push(image.display().to_string());

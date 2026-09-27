@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "defaults",
+    "read",
+    "-g",
+    "AppleInterfaceStyle"
+  ],
+  "captured_at": "2026-09-26T16:56:27",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "Dark\n",
+  "stderr": ""
+}

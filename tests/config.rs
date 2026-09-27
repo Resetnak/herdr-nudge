@@ -28,6 +28,10 @@ fn defaults() {
     assert_eq!(c.notifications.clickable_secs, 3600);
     assert!(!c.notifications.sound, "notifications.sound default");
     assert!(c.notifications.agent_logos);
+    assert!(
+        c.notifications.show_workspace,
+        "notifications.show_workspace default"
+    );
     assert!(c.agents.enabled && c.shell.enabled);
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked, AgentStatus::Done]);
     assert!(c.agents.ignore.is_empty());
@@ -46,6 +50,7 @@ default_terminal = "com.mitchellh.ghostty"
 clickable_secs = 600
 sound = true
 agent_logos = false
+show_workspace = false
 
 [agents]
 enabled = true
@@ -67,6 +72,7 @@ known_agents_remove = ["pi"]
     assert_eq!(c.default_terminal.as_deref(), Some("com.mitchellh.ghostty"));
     assert_eq!(c.notifications.clickable_secs, 600);
     assert!(c.notifications.sound);
+    assert!(!c.notifications.show_workspace, "show_workspace = false");
     assert_eq!(c.agents.statuses, [AgentStatus::Blocked]);
     assert_eq!(c.agents.ignore, ["codex"]);
     assert!(!c.shell.enabled);

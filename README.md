@@ -129,6 +129,8 @@ change:
 | `[shell] notify_on_failure_only` | `false` | Only failed commands. |
 | `[shell] ignore_commands` | editors, pagers, `ssh`, `tmux`, … | Matched on the command name. A list you set replaces the default one. |
 | `[notifications] sound` | `false` | Herdr plays its own sound for these events; `true` adds ours. |
+| `[notifications] agent_logos` | `true` | The agent's logo on the right of the notification. |
+| `[notifications] show_workspace` | `true` | The workspace's name under the title. |
 | `default_terminal` | unset | Bundle id of the app a click brings forward. Unset, it's the terminal your Herdr client runs in. It's a top-level key, so it goes above the first `[section]`. |
 
 A key the plugin doesn't know makes it ignore the whole file and use the
@@ -147,3 +149,6 @@ upgrade, see `tests/fixtures/README.md`.
 
 MIT. terminal-notifier is MIT too; its licence is in
 `vendor/terminal-notifier-LICENSE.md`.
+
+The Herdr logo and the agent logos belong to their owners, and this plugin
+isn't affiliated with any of them. `NOTICE.md` lists where each came from.

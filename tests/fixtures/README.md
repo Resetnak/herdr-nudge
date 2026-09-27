@@ -205,6 +205,8 @@ belong to the probe; tests should override them.
 | `sys/lsappinfo-bundleid-gone` | – | an app that has quit: `[ NULL ]`, still exit 0 |
 | `sys/open-bundle-ghostty` | – | `open -b` raising the terminal a click goes to: exit 0, no output |
 | `sys/open-bundle-unknown` | – | `open -b` with a bundle id nothing has: exit 1, reason on stderr |
+| `sys/defaults-appearance-light` | – | `defaults read -g AppleInterfaceStyle` in light mode: exit 1, the key doesn't exist |
+| `sys/defaults-appearance-dark` | – | the same in dark mode: exit 0, `Dark` |
 | `sys/pgrep-herdr-two-sessions` | – | every `herdr` process: the default session's server (86129) and two clients (86128 in Ghostty, 21836 in iTerm), and a second session `nudge-capture` with its server (40823) and three clients (40822, 40852, 40869) |
 | `sys/pgrep-herdr-none` | – | the same query matching nothing: exit 1, no output. Captured with a pattern that matches no process, so tests replay it under the real argv |
 | `sys/lsof-capture-session-clients` | – | unix sockets of both servers and every client. Each server holds its own `herdr.sock` under that name, and each client connects to a `herdr-client.sock` socket of its own server |

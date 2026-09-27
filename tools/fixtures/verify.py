@@ -353,6 +353,13 @@ class Verify:
         self.tool("lsappinfo-find-not-running", ["lsappinfo", "find", "bundleid=io.github.dev.no-such-app"])
         self.tool("lsappinfo-visible-process-list", ["lsappinfo", "visibleProcessList"])
         self.tool("open-bundle-unknown", ["open", "-b", "io.github.dev.no-such-app"])
+        # The reply is this Mac's appearance, so it's compared with the
+        # capture for whichever one is on now.
+        appearance = ["defaults", "read", "-g", "AppleInterfaceStyle"]
+        dark = subprocess.run(appearance, capture_output=True, text=True).stdout.strip() == "Dark"
+        mode, other = ("dark", "light") if dark else ("light", "dark")
+        SKIPPED[f"sys/defaults-appearance-{other}"] = f"same command, and macOS is in {mode} mode"
+        self.tool(f"defaults-appearance-{mode}", appearance)
         # Its values are this Mac's notification settings and the checkout's
         # path, so only the names are compared. They sit in a 20-character
         # column after a 2-space indent, and "notification centre" fills it.

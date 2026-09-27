@@ -46,6 +46,7 @@ pub struct Notifications {
     /// pane has already left by the time Herdr checks.
     pub sound: bool,
     pub agent_logos: bool,
+    pub show_workspace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -85,6 +86,7 @@ impl Default for Notifications {
             clickable_secs: 3600,
             sound: false,
             agent_logos: true,
+            show_workspace: true,
         }
     }
 }
@@ -326,6 +328,8 @@ clickable_secs = {clickable_secs}
 sound = {sound}
 # The agent's logo on the right of the banner.
 agent_logos = {agent_logos}
+# The workspace's name under the title.
+show_workspace = {show_workspace}
 
 [agents]
 # AI agent panes: Claude, Codex and the others Herdr knows.
@@ -358,6 +362,7 @@ known_agents_remove = {known_agents_remove}
         clickable_secs = n.clickable_secs,
         sound = n.sound,
         agent_logos = n.agent_logos,
+        show_workspace = n.show_workspace,
         agents_enabled = a.enabled,
         agents_statuses = toml_array(a.statuses.iter().map(|s| s.as_str())),
         agents_ignore = toml_array(a.ignore.iter().map(String::as_str)),
