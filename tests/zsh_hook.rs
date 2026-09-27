@@ -4,9 +4,10 @@
 //!
 //! zsh runs preexec and precmd for commands read from a pipe too, so no pty
 //! is needed. Lines written all at once are what typing ahead looks like to
-//! the hook; a `Pause` between them is a person waiting at the prompt. The
-//! threshold is 1 s and the long commands sleep for 1.6 s, so each test
-//! takes a few seconds.
+//! the hook. A `Pause` counts from when a line was sent, not from when zsh
+//! ran it, and a slow machine can start zsh late, so a person waiting at the
+//! prompt is `WaitIdle` then a `Pause`. The threshold is 1 s and the long
+//! commands sleep for 1.6 s, so each test takes a few seconds.
 //!
 //! The stub answers `pane get` with a captured reply, a plain shell pane
 //! unless a test picks another.
@@ -44,11 +45,29 @@ exit "$(cat "$d/pane-get.code")"
 enum Step<'a> {
     Line(&'a str),
     Pause(u64),
+    /// Until an `idle` report is logged. precmd notes the prompt's time
+    /// before it sends one, so a pause after this is a pause at the prompt.
+    WaitIdle,
+    /// Until this file exists in the shell's directory: a command that
+    /// creates it has started, so its preexec has run.
+    WaitFile(&'a str),
     /// SIGKILL the shell, so no precmd or zshexit runs.
     Kill,
 }
 
-use Step::{Kill, Line, Pause};
+use Step::{Kill, Line, Pause, WaitFile, WaitIdle};
+
+/// Checks every 20 ms until `done` or `timeout`, and says which.
+fn poll(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !done() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    true
+}
 
 struct Shell {
     dir: PathBuf,
@@ -166,6 +185,26 @@ impl Shell {
                     let _ = writeln!(stdin, "{line}");
                 }
                 Pause(ms) => thread::sleep(Duration::from_millis(*ms)),
+                WaitIdle | WaitFile(_) => {
+                    let arrived = poll(Duration::from_secs(10), || match step {
+                        WaitFile(name) => self.dir.join(name).exists(),
+                        _ => self
+                            .read_calls()
+                            .iter()
+                            .any(|c| arg_after(c, "--state") == Some("idle")),
+                    });
+                    if !arrived {
+                        // Left running, zsh and its watcher would go on
+                        // writing into the scratch dir.
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let what = match step {
+                            WaitFile(name) => format!("{name} created"),
+                            _ => "an idle report".to_owned(),
+                        };
+                        panic!("no {what} after 10 s: {:#?}", self.read_calls());
+                    }
+                }
                 Kill => {
                     child.kill().unwrap();
                     break;
@@ -198,10 +237,7 @@ impl Shell {
     /// Every call so far, once `count` have arrived (or after 5 s), plus
     /// anything that turns up in the next half second.
     fn calls(&self, count: usize) -> Vec<Vec<String>> {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while self.read_calls().len() < count && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(20));
-        }
+        poll(Duration::from_secs(5), || self.read_calls().len() >= count);
         thread::sleep(Duration::from_millis(500));
         self.read_calls()
     }
@@ -345,14 +381,18 @@ fn releases(calls: &[Vec<String>]) -> Vec<&Vec<String>> {
 
 #[test]
 fn a_command_typed_at_the_prompt_releases_the_claim() {
-    // The pause outlasts `sleep 1.6` by more than a second, so `true` starts
-    // well after the prompt came back.
+    // `true` starts 1.5 s after the prompt, well past the hook's 1 s
+    // typed-ahead window. A fixed pause from sending the first line failed
+    // on a slow CI runner, where zsh started that command late. The sleeps
+    // are longer than elsewhere so the watcher has 1.5 s after its 1 s
+    // threshold to ask and claim before precmd stops it.
     let shell = Shell::new("zsh_release_at_prompt", CONFIG);
     shell.steps(&[
-        Line("sleep 1.6"),
-        Pause(3000),
+        Line("sleep 2.5"),
+        WaitIdle,
+        Pause(1500),
         Line("true"),
-        Line("sleep 1.6"),
+        Line("sleep 2.5"),
     ]);
     let calls = shell.calls(12);
     let released = releases(&calls);
@@ -458,9 +498,11 @@ fn exec_is_not_timed() {
 #[test]
 fn a_killed_shell_leaves_no_claim() {
     // SIGKILL runs no zshexit. The watcher outlives the shell and must not
-    // report once its deadline comes.
+    // report once its deadline comes. Killing only after `started` exists
+    // makes sure there is a watcher: a fixed pause could kill a slow shell
+    // before preexec, and the test would pass without one.
     let shell = Shell::new("zsh_killed", CONFIG);
-    shell.steps(&[Line("sleep 3"), Pause(300), Kill]);
+    shell.steps(&[Line("touch started; sleep 3"), WaitFile("started"), Kill]);
     shell.assert_no_calls();
 }
 
