@@ -13,10 +13,6 @@ herdr plugin install justinchiasson/herdr-nudge
 macOS only (Apple Silicon or Intel, tested on macOS 26), Herdr 0.9.0 or
 later. Nothing else to install.
 
-An agent needs you, you click, and you're at its prompt:
-
-<video src="https://github.com/user-attachments/assets/41173489-4fc2-46d9-a287-c566a322cad7" controls muted></video>
-
 ## What it does
 
 - **Agents.** A notification when an agent goes `blocked` (it's waiting for
