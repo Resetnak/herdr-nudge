@@ -36,51 +36,62 @@ later. Nothing else to install.
 
 ## Install
 
-```sh
-herdr plugin install justinchiasson/herdr-nudge
-```
+1. Install the plugin:
 
-Herdr shows what the plugin will run and asks first. That's it: the next
-time an agent needs you, you get a notification. The first one makes macOS
-ask whether Herdr Nudge may send notifications. Allow it.
+   ```sh
+   herdr plugin install justinchiasson/herdr-nudge
+   ```
 
-The first time the plugin runs after an install or update, it registers its
-notifier app with macOS, the way opening an app from Finder would. Some
-Macs won't ask for permission until an app is registered, and running it
-isn't always enough. It registers it again whenever Herdr starts and when
-you run `doctor`. To remember it's done, it keeps a small file in its own
-state folder.
+   Herdr shows what the plugin will run and asks first. If macOS offers to
+   install the Command Line Tools, accept: Herdr needs `git` for this.
+2. Wait for your first notification. macOS asks whether Herdr Nudge may send
+   notifications. Click **Allow**.
 
-If macOS offers to install the Command Line Tools during the install, accept:
-`herdr plugin install` uses `git`, which comes with them.
+That's all for agents. For long shell commands, add the
+[zsh hook](#shell-commands-optional-zsh) too.
 
-If you turned on Herdr's own desktop notifications, turn them off, or you'll
-get two of everything. In `~/.config/herdr/config.toml`, set `delivery` under
-`[ui.toast]` to `"herdr"` (in-app only) or `"off"`, then run `herdr server
-reload-config`. They're off unless you changed it.
+To update, run the install command again. To remove it, run
+`herdr plugin uninstall herdr-nudge`, and take the zsh lines out of
+`.zshrc` if you added them.
 
-macOS shows a notification for a few seconds, then keeps it in Notification
-Center, clickable for an hour. To keep them on screen until you deal with
-them, set Herdr Nudge's alert style to *Persistent* in System Settings >
-Notifications (*Alerts* on older macOS).
+**Tips**
 
-To update, run the install command again. To remove it, `herdr plugin
-uninstall herdr-nudge` (and the `.zshrc` lines, if you added them).
+- Notifications stay on screen for a few seconds, then wait in
+  Notification Center for an hour. To keep them on screen until you deal
+  with them, set Herdr Nudge's alert style to *Persistent* in System
+  Settings > Notifications (*Alerts* on older macOS).
+- If every notification shows up twice, Herdr's own desktop notifications
+  are on as well. [Troubleshooting](#troubleshooting) says how to turn them
+  off.
 
 ## Shell commands (optional, zsh)
 
 Herdr tells the plugin about agents by itself, but not about shell commands.
-To get a notification when a long command finishes, add this to your
-`~/.zshrc` (`$ZDOTDIR/.zshrc` if you set `ZDOTDIR`):
+A small zsh hook does that. To turn it on:
+
+1. Add the hook to your `.zshrc`:
+
+   ```sh
+   ~/.config/herdr/plugins/github/herdr-nudge-*/bin/herdr-nudge setup-zsh
+   ```
+
+   It shows the three lines it will add and changes nothing until you say
+   yes.
+2. Restart Herdr once, so the plugin writes the file those lines load:
+   `herdr server stop`, then `herdr`. `setup-zsh` tells you if you need to.
+3. Open a new pane. Panes that were already open don't have the hook.
+
+To check it works, run `sleep 6` in the new pane and switch to another app.
+A notification should appear when it finishes.
+
+If you'd rather edit `.zshrc` yourself (`$ZDOTDIR/.zshrc` if you set
+`ZDOTDIR`), these are the lines:
 
 ```zsh
 if [[ -r ~/.local/state/herdr/plugins/herdr-nudge/herdr-nudge.zsh ]]; then
   source ~/.local/state/herdr/plugins/herdr-nudge/herdr-nudge.zsh
 fi
 ```
-
-Then restart Herdr once (`herdr server stop`, then `herdr`), so the plugin
-writes the file those lines load.
 
 Any command that runs for 5 seconds or more counts. To change that, set
 `min_seconds` in the plugin's config file (see
@@ -121,7 +132,7 @@ alias herdr-nudge='~/.config/herdr/plugins/github/herdr-nudge-*/bin/herdr-nudge'
 | `doctor` | Checks what stops notifications: a config that doesn't load, `[agents] ignore` entries that match nothing, macOS permission and alert style, Herdr's own system toasts (which would double up), and whether `.zshrc` loads the hook. Exits 1 if something is broken. |
 | `test` | Posts an agent-style notification for the pane it runs in. Switch away and click it to see where it takes you. `test --shell` posts a shell-command one. Run it inside a Herdr pane. |
 | `example-config` | Writes `config.toml` with every setting at its default and a note on each. If the file already exists, it prints the example and leaves your file alone. |
-| `setup-zsh` | Adds the zsh lines above to `.zshrc`, after showing them and asking. Does nothing if they're already there. |
+| `setup-zsh` | Adds the lines from [Shell commands](#shell-commands-optional-zsh) to `.zshrc`, after showing them and asking. Does nothing if they're already there. |
 
 You may also see the binary run with `--cleanup`, `--click` or no arguments.
 Herdr runs it that way when it starts and on each event, and a notification
@@ -192,6 +203,15 @@ That's on purpose. If the pane is focused in Herdr and your terminal is the
 app in front, you're already watching it. Switch to another pane or app and
 you'll get one.
 
+**Does it change anything on my Mac?**
+Very little. The first time it runs after an install or update, it
+registers its notifier app with macOS, the way opening an app from Finder
+would. Some Macs won't ask for notification permission until that's done,
+and running the app isn't always enough. It registers it again when Herdr
+starts and when you run `doctor`. Its own files, including the zsh hook,
+live in Herdr's state folder for the plugin. It only touches `.zshrc` if you
+run `setup-zsh` and say yes.
+
 **Does it send anything over the network?**
 No. It only talks to Herdr and to macOS's notification service.
 
@@ -217,10 +237,10 @@ most of what's below and says what to fix.
 - Nothing is posted for the pane you're looking at (see the [FAQ](#faq)).
 
 **Agent notifications work, but shell commands don't**
-- Check that `.zshrc` has the lines from
-  [Shell commands](#shell-commands-optional-zsh), and that you've restarted
-  Herdr with `herdr server stop`, then `herdr` since installing. Shells that
-  were already open don't have the hook until you open a new one.
+- Check that you've done all three steps in
+  [Shell commands](#shell-commands-optional-zsh): the `.zshrc` lines, a
+  Herdr restart since installing, and a new pane. `doctor` checks the first
+  two.
 - The command has to run for at least `min_seconds` (5 by default).
 - Commands in `ignore_commands` (editors, pagers, `ssh` and the like) never
   notify, and with `notify_on_failure_only = true` only failed ones do.
@@ -233,8 +253,10 @@ That matches on the command's name alone, so `"git"` silences every git
 command.
 
 **Every event notifies twice**
-Herdr's own desktop notifications are on as well. [Install](#install) says
-how to turn them off.
+Herdr's own desktop notifications are on as well. In
+`~/.config/herdr/config.toml`, set `delivery` under `[ui.toast]` to
+`"herdr"` (in-app only) or `"off"`, then run `herdr server reload-config`.
+They're off unless you changed it.
 
 **Clicking brings up the wrong window, tab or app**
 A click brings your terminal to the front, but it can't pick the window or
