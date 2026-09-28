@@ -31,6 +31,7 @@ use crate::event::{AgentStatus, Envelope, EventData, StatusEvent};
 use crate::herdr::{Cli, PaneInfo};
 use crate::notifier::{self, Notifier, Post};
 use crate::process::{Runner, Spawner};
+use crate::register;
 use crate::state::{self, AgentsCache, Job, Loaded, StateDir, VERSION};
 use crate::terminal;
 
@@ -163,6 +164,7 @@ pub fn handle<R: Runner, S: Spawner>(
     context: Option<&Context>,
 ) -> Report {
     let mut notes = Vec::new();
+    ensure_registered(deps, &mut notes);
     let jobs = live_jobs(deps.state, deps.spawner, deps.now_ms, &mut notes);
 
     let outcome = match &envelope.data {
@@ -186,6 +188,16 @@ pub fn handle<R: Runner, S: Spawner>(
     Report { outcome, notes }
 }
 
+/// First thing in a hook, before a withdrawal or a post can run the
+/// notifier. After an update the copy on disk is new, and its first run
+/// might be a `-remove`.
+fn ensure_registered<R: Runner, S: Spawner>(deps: &Deps<R, S>, notes: &mut Vec<String>) {
+    let bundle = notifier::bundle_path(deps.plugin_root);
+    if let Some(result) = register::ensure(deps.state, deps.runner, &bundle, deps.now_ms) {
+        notes.push(register::note(&bundle, result));
+    }
+}
+
 /// What runs as Herdr's startup hook, once per server start (not when a
 /// client attaches).
 ///
@@ -199,16 +211,28 @@ pub fn handle<R: Runner, S: Spawner>(
 /// `herdr_bin` is `None` when the hook's environment didn't say where
 /// `herdr` is. The list is then left as it was.
 ///
+/// The notifier is registered first, whatever the marker says, before the
+/// withdrawals run it. `bundle` is `None` when the plugin couldn't be found.
+///
 /// Returns the notes and the agent list if one was fetched, which the zsh
 /// hook's install needs even when saving it failed.
 pub fn cleanup<R: Runner, S: Spawner>(
     state: &StateDir,
+    bundle: Option<&Path>,
     herdr_bin: Option<&Path>,
     runner: &R,
     spawner: &S,
     now_ms: u64,
 ) -> (Vec<String>, Option<AgentsCache>) {
     let mut notes = Vec::new();
+
+    match bundle {
+        Some(bundle) => notes.push(register::note(
+            bundle,
+            register::always(state, runner, bundle, now_ms),
+        )),
+        None => notes.push("no plugin folder, notifier not registered".to_owned()),
+    }
 
     let mut jobs = Vec::new();
     match state.job_ids() {
@@ -256,6 +280,7 @@ pub fn cleanup<R: Runner, S: Spawner>(
 /// hook for that status change can take the new banner down if it runs late.
 pub fn test<R: Runner, S: Spawner>(deps: &Deps<R, S>, pane_id: &str, kind: PaneKind) -> Report {
     let mut notes = Vec::new();
+    ensure_registered(deps, &mut notes);
     let jobs = live_jobs(deps.state, deps.spawner, deps.now_ms, &mut notes);
 
     if !deps.notifier_bin.is_file() {

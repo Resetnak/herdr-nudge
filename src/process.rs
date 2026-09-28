@@ -28,6 +28,18 @@ impl Output {
 pub trait Runner {
     /// Runs `program` with `args` directly, never through a shell.
     fn run(&self, program: &Path, args: &[&str]) -> io::Result<Output>;
+
+    /// [`Runner::run`] with its own time limit, for the one call that can
+    /// be slow on a busy Mac. A replay has no clock, so by default the
+    /// limit is ignored.
+    fn run_with_timeout(
+        &self,
+        program: &Path,
+        args: &[&str],
+        _timeout: Duration,
+    ) -> io::Result<Output> {
+        self.run(program, args)
+    }
 }
 
 /// Starting a program and not waiting for it.
@@ -101,6 +113,15 @@ impl Runner for System {
             stdout: collect(stdout, deadline).ok_or_else(timed_out)?,
             stderr: collect(stderr, deadline).ok_or_else(timed_out)?,
         })
+    }
+
+    fn run_with_timeout(
+        &self,
+        program: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> io::Result<Output> {
+        System { timeout }.run(program, args)
     }
 }
 

@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::herdr;
 use crate::notifier;
 use crate::process::Runner;
+use crate::register;
 use crate::shell_hook::{Zshrc, read_zshrc, shown_path, zsh_block, zshrc_loads};
 use crate::state::{self, Loaded, StateDir};
 
@@ -96,7 +97,12 @@ pub fn run(inputs: &Inputs, runner: &impl Runner) -> Report {
     };
     check_state(&mut report, inputs);
     check_config(&mut report, &inputs.config_dir, manifests.as_ref());
-    check_notifier(&mut report, runner, inputs.plugin_root.as_deref());
+    check_notifier(
+        &mut report,
+        runner,
+        &inputs.state,
+        inputs.plugin_root.as_deref(),
+    );
     check_toast(&mut report, &inputs.herdr_config);
     check_zsh(&mut report, inputs);
     report
@@ -188,7 +194,12 @@ pub fn unknown_agents<'a>(config: &'a Config, manifests: &BTreeSet<String>) -> V
         .collect()
 }
 
-fn check_notifier(report: &mut Report, runner: &impl Runner, root: Option<&Path>) {
+fn check_notifier(
+    report: &mut Report,
+    runner: &impl Runner,
+    state: &StateDir,
+    root: Option<&Path>,
+) {
     let Some(root) = root else {
         report.add(
             Level::Fail,
@@ -196,6 +207,12 @@ fn check_notifier(report: &mut Report, runner: &impl Runner, root: Option<&Path>
         );
         return;
     };
+    // First, so that `-diagnose` below sees what a post would: an app macOS
+    // has on record.
+    if let Err(e) = register::always(state, runner, &notifier::bundle_path(root), state::now_ms()) {
+        // Each message already says what it was registering.
+        report.add(Level::Warn, e);
+    }
     let binary = notifier::binary_path(root);
     let out = match runner.run(&binary, &["-diagnose"]) {
         Ok(out) => out,

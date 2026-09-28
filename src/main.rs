@@ -133,8 +133,10 @@ fn run_cleanup() -> ExitCode {
     let herdr_bin = env_path("HERDR_BIN_PATH");
     let config_dir = env_path("HERDR_PLUGIN_CONFIG_DIR");
     let system = System::default();
+    let bundle = plugin_root().map(|root| notifier::bundle_path(&root));
     let (mut notes, fetched) = handler::cleanup(
         &state,
+        bundle.as_deref(),
         herdr_bin.as_deref(),
         &system,
         &system,
@@ -239,9 +241,7 @@ fn run_test(shell: bool) -> ExitCode {
         eprintln!("herdr-nudge: cannot find my own path, nothing would be clickable");
         return ExitCode::FAILURE;
     };
-    let Some(plugin_root) =
-        env_path("HERDR_PLUGIN_ROOT").or_else(|| context::plugin_root_above(&self_bin))
-    else {
+    let Some(plugin_root) = plugin_root() else {
         eprintln!(
             "herdr-nudge: no herdr-plugin.toml above {}, cannot find the notifier",
             self_bin.display()
@@ -307,8 +307,7 @@ fn run_doctor() -> ExitCode {
     let system = System::default();
     let config_dir = config::locate_dir(env_path("HERDR_PLUGIN_CONFIG_DIR"), &herdr_bin(), &system)
         .map_err(|e| e.to_string());
-    let plugin_root = env_path("HERDR_PLUGIN_ROOT")
-        .or_else(|| own_path().and_then(|p| context::plugin_root_above(&p)));
+    let plugin_root = plugin_root();
     // The order `herdr config check` reads them in (checked on 0.9.1).
     let herdr_config = env_path("HERDR_CONFIG_PATH").unwrap_or_else(|| {
         env_path("XDG_CONFIG_HOME")
@@ -403,6 +402,13 @@ fn env_path(name: &str) -> Option<PathBuf> {
 /// its `PATH`.
 fn herdr_bin() -> PathBuf {
     env_path("HERDR_BIN_PATH").unwrap_or_else(|| PathBuf::from("herdr"))
+}
+
+/// Where the plugin is, notifier included: Herdr says so in a hook, and
+/// from a user's shell it's the folder above our binary.
+fn plugin_root() -> Option<PathBuf> {
+    env_path("HERDR_PLUGIN_ROOT")
+        .or_else(|| own_path().and_then(|p| context::plugin_root_above(&p)))
 }
 
 /// Our own absolute path, for the click command.

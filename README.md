@@ -44,6 +44,13 @@ Herdr shows what the plugin will run and asks first. That's it: the next
 time an agent needs you, you get a notification. The first one makes macOS
 ask whether Herdr Nudge may send notifications. Allow it.
 
+The first time the plugin runs after an install or update, it registers its
+notifier app with macOS, the way opening an app from Finder would. Some
+Macs won't ask for permission until an app is registered, and running it
+isn't always enough. It registers it again whenever Herdr starts and when
+you run `doctor`. To remember it's done, it keeps a small file in its own
+state folder.
+
 If macOS offers to install the Command Line Tools during the install, accept:
 `herdr plugin install` uses `git`, which comes with them.
 

@@ -2,15 +2,18 @@
 
 mod support;
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use herdr_nudge::classify::{ClassifySignal, PaneKind};
 use herdr_nudge::cli::JobId;
 use herdr_nudge::config::Config;
 use herdr_nudge::event::{AgentStatus, Envelope};
 use herdr_nudge::handler::{self, Deps, Outcome};
+use herdr_nudge::process::Spawner;
 use herdr_nudge::state::{AgentsCache, Loaded, StateDir, now_ms};
 use support::{Fixture, Recorded, Replay, Spy, scratch_dir};
 
@@ -70,6 +73,10 @@ impl Harness {
     }
 
     fn deps(&self) -> Deps<'_, Replay, Spy> {
+        self.deps_with(&self.spy)
+    }
+
+    fn deps_with<'a, S: Spawner>(&'a self, spawner: &'a S) -> Deps<'a, Replay, S> {
         Deps {
             config: &self.config,
             state: &self.state,
@@ -79,7 +86,7 @@ impl Harness {
             self_bin: &self.self_bin,
             plugin_root: &self.plugin_root,
             runner: &self.runner,
-            spawner: &self.spy,
+            spawner,
             now_ms: self.now_ms,
             pid: 4242,
         }
@@ -1491,6 +1498,7 @@ fn cleanup_drops_every_job_and_refreshes_the_agent_list() {
 
     let (notes, fetched) = handler::cleanup(
         &harness.state,
+        None,
         Some(&harness.herdr_bin),
         &harness.runner,
         &harness.spy,
@@ -1529,6 +1537,7 @@ fn cleanup_without_herdr_still_drops_jobs() {
     let (notes, fetched) = handler::cleanup(
         &harness.state,
         None,
+        None,
         &harness.runner,
         &harness.spy,
         harness.now_ms + 1,
@@ -1546,7 +1555,14 @@ fn cleanup_keeps_a_job_posted_after_it_started() {
     // blocked_on posted the job, then moved the clock on by a second. So a
     // cleanup that started at that second saw the job posted during it.
     let started = harness.now_ms - 1_000;
-    let (notes, _) = handler::cleanup(&harness.state, None, &harness.runner, &harness.spy, started);
+    let (notes, _) = handler::cleanup(
+        &harness.state,
+        None,
+        None,
+        &harness.runner,
+        &harness.spy,
+        started,
+    );
     assert_eq!(harness.state.job_ids().unwrap().len(), 1, "{notes:?}");
     assert_eq!(removes(&harness.spy), Vec::<String>::new(), "{notes:?}");
 }
@@ -1803,5 +1819,112 @@ fn test_with_an_empty_workspace_label_uses_the_id() {
         Spy::arg_after(&harness.spy.only(), "-subtitle").as_deref(),
         Some("w3"),
         "workspace-get-empty-label: subtitle"
+    );
+}
+
+/// Gives the harness's fake bundle an `Info.plist`, which the fake from
+/// [`Harness::new`] lacks (so no other test registers anything), and
+/// `osascript` its recorded answer for that bundle.
+fn registrable(harness: &mut Harness) -> PathBuf {
+    let bundle = herdr_nudge::notifier::bundle_path(&harness.plugin_root);
+    fs::write(bundle.join("Contents/Info.plist"), b"<plist/>").unwrap();
+    let mut osascript = Recorded::sys("osascript-register-bundle");
+    osascript.argv.truncate(5);
+    osascript.argv.push(bundle.display().to_string());
+    harness.runner = std::mem::take(&mut harness.runner).with(osascript);
+    bundle
+}
+
+/// Notes, at each spawn, whether the registration marker was there yet.
+struct MarkerAtSpawn {
+    marker: PathBuf,
+    seen: RefCell<Vec<bool>>,
+}
+
+impl MarkerAtSpawn {
+    fn new(state: &StateDir) -> MarkerAtSpawn {
+        MarkerAtSpawn {
+            marker: state.registered_path(),
+            seen: RefCell::default(),
+        }
+    }
+}
+
+impl Spawner for MarkerAtSpawn {
+    fn spawn(&self, _program: &Path, _args: &[String]) -> io::Result<()> {
+        self.seen.borrow_mut().push(self.marker.is_file());
+        Ok(())
+    }
+}
+
+#[test]
+fn the_first_post_registers_the_notifier() {
+    let mut harness = Harness::answering("post_registers", "w1:p1", "pane-get-unfocused");
+    harness.config.default_terminal = Some("com.mitchellh.ghostty".to_owned());
+    harness.remember_agents(&["claude"]);
+    registrable(&mut harness);
+    let spawner = MarkerAtSpawn::new(&harness.state);
+
+    let report = handler::handle(
+        &harness.deps_with(&spawner),
+        &on_pane("agent/blocked", "w1:p1"),
+        None,
+    );
+
+    assert!(
+        matches!(report.outcome, Outcome::Posted(_)),
+        "agent/blocked on w1:p1: {:?}",
+        report.outcome
+    );
+    assert_eq!(
+        *spawner.seen.borrow(),
+        vec![true],
+        "marker present at each spawn; notes: {:?}",
+        report.notes
+    );
+}
+
+/// After an update the copy on disk is new, and the first thing to run it
+/// can be a withdrawal of a banner posted before the update.
+#[test]
+fn a_withdrawal_registers_the_notifier_before_running_it() {
+    let mut harness = blocked_on("withdraw_registers", "w1:p1");
+    registrable(&mut harness);
+    let spawner = MarkerAtSpawn::new(&harness.state);
+
+    let report = handler::handle(
+        &harness.deps_with(&spawner),
+        &on_pane("lifecycle/pane-closed", "w1:p1"),
+        None,
+    );
+
+    assert_eq!(
+        *spawner.seen.borrow(),
+        vec![true],
+        "marker present at the -remove spawn; outcome {:?}, notes {:?}",
+        report.outcome,
+        report.notes
+    );
+}
+
+#[test]
+fn cleanup_registers_before_it_withdraws() {
+    let mut harness = blocked_on("cleanup_registers", "w1:p1");
+    let bundle = registrable(&mut harness);
+    let spawner = MarkerAtSpawn::new(&harness.state);
+
+    let (notes, _) = handler::cleanup(
+        &harness.state,
+        Some(&bundle),
+        None,
+        &harness.runner,
+        &spawner,
+        harness.now_ms + 1,
+    );
+
+    assert_eq!(
+        *spawner.seen.borrow(),
+        vec![true],
+        "marker present at the -remove spawn; notes {notes:?}"
     );
 }

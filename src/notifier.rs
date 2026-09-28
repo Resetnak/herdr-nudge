@@ -26,7 +26,11 @@ pub fn bundle_path(plugin_root: &Path) -> PathBuf {
 }
 
 pub fn binary_path(plugin_root: &Path) -> PathBuf {
-    bundle_path(plugin_root).join(BINARY)
+    binary_in(&bundle_path(plugin_root))
+}
+
+pub fn binary_in(bundle: &Path) -> PathBuf {
+    bundle.join(BINARY)
 }
 
 /// Whether macOS is in dark mode right now.

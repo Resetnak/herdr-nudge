@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "osascript",
+    "-l",
+    "JavaScript",
+    "-e",
+    "function run(argv) { ObjC.import(\"CoreServices\"); return $.LSRegisterURL($.NSURL.fileURLWithPath(argv[0]), true) }",
+    "/Users/dev/Developer/herdr-nudge/vendor/HerdrNudge.app"
+  ],
+  "captured_at": "2026-09-27T18:05:22",
+  "macos_version": "26.6.2",
+  "exit_code": 0,
+  "stdout": "0\n",
+  "stderr": ""
+}

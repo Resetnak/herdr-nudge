@@ -223,6 +223,8 @@ belong to the probe; tests should override them.
 | `sys/ps-env-server-documents` | – | `nudgedocs`: `HOME=/tmp/hnd/a`, `XDG_STATE_HOME` in that home's `Documents` |
 | `sys/ps-env-server-no-home` | – | `nudgenohome`: no `HOME` at all, `XDG_STATE_HOME=/tmp/hnd/b/Documents/state` |
 | `sys/terminal-notifier-diagnose` | – | our bundle's `-diagnose` with notifications allowed and alert style Banners |
+| `sys/osascript-register-bundle` | – | `LSRegisterURL(<our bundle>, true)` through `osascript`: prints `0`, exit 0 |
+| `sys/osascript-register-missing` | – | the same for a path that doesn't exist: prints `-43`, and still exit 0 |
 
 The `nudge-capture` session was made for these captures and deleted
 afterwards. Its server and clients were started from a pty with only

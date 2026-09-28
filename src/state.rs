@@ -379,6 +379,11 @@ impl StateDir {
         self.root.join("herdr-nudge.zsh")
     }
 
+    /// Which copy of the notifier was last registered with Launch Services.
+    pub fn registered_path(&self) -> PathBuf {
+        self.root.join("registered")
+    }
+
     pub fn agents_cache_path(&self) -> PathBuf {
         self.root.join("agents-cache.json")
     }

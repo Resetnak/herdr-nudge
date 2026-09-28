@@ -5,7 +5,8 @@
 //! [`config`] is the user's settings, [`state`] our own files, [`herdr`]
 //! every question we ask Herdr, [`classify`] whether a pane is an agent or a
 //! shell command, and [`terminal`] which app to bring forward on a click.
-//! [`content`] writes the three lines of a banner and [`notifier`] posts it.
+//! [`content`] writes the three lines of a banner and [`notifier`] posts it,
+//! after [`register`] has made sure macOS knows the notifier app.
 //! [`handler`] is what happens on an event, and [`click`] what happens when
 //! the notification is clicked. [`shell_hook`] installs the zsh hook that
 //! reports long shell commands. [`doctor`] checks the setup, and
@@ -23,6 +24,7 @@ pub mod handler;
 pub mod herdr;
 pub mod notifier;
 pub mod process;
+pub mod register;
 pub mod setup_zsh;
 pub mod shell_hook;
 pub mod state;
