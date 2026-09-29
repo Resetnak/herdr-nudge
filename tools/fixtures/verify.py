@@ -62,6 +62,7 @@ SESSION_ID = "00000000-0000-4000-8000-000000000000"
 # Captures that repeat another one's command with different processes or apps
 # around, so they add no format to check, or that can't run unattended.
 SKIPPED = {
+    "sys/lsappinfo-bundleid-ghostty-macos27": "same command as lsappinfo-bundleid-ghostty, as macOS 27 prints it",
     "sys/lsappinfo-find-iterm": "same output as lsappinfo-find-ghostty, and needs iTerm running",
     "sys/open-bundle-ghostty": "would bring a terminal to the front",
     "sys/lsof-capture-session-clients": "same command as lsof-capture-session-one-client, more processes",
@@ -345,8 +346,10 @@ class Verify:
         self.tool("lsappinfo-front", ["lsappinfo", "front"])
         self.tool("lsappinfo-bundleid-ghostty", ["lsappinfo", "info", "-only", "bundleid", front])
         self.tool("lsappinfo-bundleid-gone", ["lsappinfo", "info", "-only", "bundleid", "ASN:0x0-0xfffff0:"])
-        bundle = subprocess.run(["lsappinfo", "info", "-only", "bundleid", front],
-                                capture_output=True, text=True).stdout.split("=")[-1].strip().strip('"')
+        info = subprocess.run(["lsappinfo", "info", "-only", "bundleid", front],
+                              capture_output=True, text=True).stdout
+        # One line on macOS 26, an info block with a bundleID= line on 27.
+        bundle = re.search(r'(?:"CFBundleIdentifier"|bundleID)="([^"]+)"', info).group(1)
         # Whatever is in front stands in for Ghostty, and a made-up id for
         # Terminal.app, so neither depends on which apps are open.
         self.tool("lsappinfo-find-ghostty", ["lsappinfo", "find", f"bundleid={bundle}"])
