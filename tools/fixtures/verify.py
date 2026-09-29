@@ -63,6 +63,10 @@ SESSION_ID = "00000000-0000-4000-8000-000000000000"
 # around, so they add no format to check, or that can't run unattended.
 SKIPPED = {
     "sys/lsappinfo-bundleid-ghostty-macos27": "same command as lsappinfo-bundleid-ghostty, as macOS 27 prints it",
+    "sys/lsappinfo-bundleid-textedit-macos27": "same command as lsappinfo-bundleid-ghostty, as macOS 27 prints it",
+    "sys/lsappinfo-bundleid-gone-macos27": "same command as lsappinfo-bundleid-gone, as macOS 27 prints it",
+    "sys/lsappinfo-bundleid-quit-macos27": "same command as lsappinfo-bundleid-gone, for an app that quit, on macOS 27",
+    "sys/lsappinfo-front-macos27": "same command as lsappinfo-front, as macOS 27 prints it",
     "sys/lsappinfo-find-iterm": "same output as lsappinfo-find-ghostty, and needs iTerm running",
     "sys/open-bundle-ghostty": "would bring a terminal to the front",
     "sys/lsof-capture-session-clients": "same command as lsof-capture-session-one-client, more processes",
@@ -224,6 +228,7 @@ class Verify:
             stdout = "".join(l for l in stdout.splitlines(True) if l.split(" ", 1)[0] in keep)
         live = {"exit_code": proc.returncode, "stdout": stdout, "stderr": proc.stderr}
         self.compare("sys", base, live, ["exit_code", "stdout", "stderr"], None, mask)
+        return stdout
 
     def pane(self, pane_id):
         return json.loads(self.herdr("pane", "get", pane_id).stdout)["result"]["pane"]
@@ -342,14 +347,14 @@ class Verify:
                   ["ps", "-Eww", "-o", "pid=,etime=,command=", "-p", str(attached)])
         self.tool("ps-env-server-plain", ["ps", "-Eww", "-o", "command=", "-p", str(server.pid)])
 
-        front = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True).stdout.strip()
-        self.tool("lsappinfo-front", ["lsappinfo", "front"])
-        self.tool("lsappinfo-bundleid-ghostty", ["lsappinfo", "info", "-only", "bundleid", front])
+        front = self.tool("lsappinfo-front", ["lsappinfo", "front"]).strip()
+        info = self.tool("lsappinfo-bundleid-ghostty", ["lsappinfo", "info", "-only", "bundleid", front])
         self.tool("lsappinfo-bundleid-gone", ["lsappinfo", "info", "-only", "bundleid", "ASN:0x0-0xfffff0:"])
-        info = subprocess.run(["lsappinfo", "info", "-only", "bundleid", front],
-                              capture_output=True, text=True).stdout
         # One line on macOS 26, an info block with a bundleID= line on 27.
-        bundle = re.search(r'(?:"CFBundleIdentifier"|bundleID)="([^"]+)"', info).group(1)
+        found = re.search(r'(?:"CFBundleIdentifier"|bundleID)="([^"]+)"', info)
+        if not found:
+            raise SystemExit(f"no bundle id for the app in front ({front!r}); bring an app to the front and run again")
+        bundle = found.group(1)
         # Whatever is in front stands in for Ghostty, and a made-up id for
         # Terminal.app, so neither depends on which apps are open.
         self.tool("lsappinfo-find-ghostty", ["lsappinfo", "find", f"bundleid={bundle}"])

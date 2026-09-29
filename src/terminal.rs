@@ -554,8 +554,8 @@ pub fn frontmost_bundle_id(runner: &impl Runner) -> Option<String> {
 /// `"CFBundleIdentifier"="com.mitchellh.ghostty"` gives the id (macOS 26).
 /// macOS 27 prints the whole info block instead, with only the asked-for
 /// line filled in, so the id is on a `bundleID="com.mitchellh.ghostty"` line.
-/// An app that has quit gives `[ NULL ]` for either, and an ASN that never
-/// existed gives nothing at all.
+/// An app that has quit, or an ASN that never existed, gives
+/// `"CFBundleIdentifier"=[ NULL ]` on macOS 26 and nothing at all on 27.
 pub fn parse_bundle_id(stdout: &str) -> Option<String> {
     let value = stdout.lines().find_map(|line| {
         let line = line.trim();

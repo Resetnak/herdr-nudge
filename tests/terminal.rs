@@ -496,19 +496,32 @@ fn bundle_id_parsing() {
 /// you are looking at still notifies.
 #[test]
 fn the_frontmost_app_is_read_from_the_macos_27_block_too() {
-    let mut info = Recorded::sys("lsappinfo-bundleid-ghostty-macos27");
-    assert_eq!(parse_bundle_id(&info.stdout).as_deref(), Some(GHOSTTY));
-
-    // Asked about the ASN the recorded `front` gave.
-    info.argv[4] = "ASN:0x0-0x64b64b:".to_owned();
-    let lsappinfo = Replay::new([Recorded::sys("lsappinfo-front"), info]);
-    assert_eq!(frontmost_bundle_id(&lsappinfo).as_deref(), Some(GHOSTTY));
-
     assert_eq!(
-        parse_bundle_id("[ NULL ]  ASN:0x0-0x1:\n    bundleID=[ NULL ] \n"),
-        None,
-        "an app that has quit"
+        parse_bundle_id(&Recorded::sys("lsappinfo-bundleid-ghostty-macos27").stdout).as_deref(),
+        Some(GHOSTTY)
     );
+
+    // `front` is still one line on macOS 27. These two were captured one
+    // after the other, with TextEdit in front.
+    let lsappinfo = Replay::new([
+        Recorded::sys("lsappinfo-front-macos27"),
+        Recorded::sys("lsappinfo-bundleid-textedit-macos27"),
+    ]);
+    assert_eq!(
+        frontmost_bundle_id(&lsappinfo).as_deref(),
+        Some("com.apple.TextEdit")
+    );
+
+    for gone in [
+        "lsappinfo-bundleid-quit-macos27",
+        "lsappinfo-bundleid-gone-macos27",
+    ] {
+        assert_eq!(
+            parse_bundle_id(&Recorded::sys(gone).stdout),
+            None,
+            "{gone}: prints nothing"
+        );
+    }
 }
 
 #[test]
