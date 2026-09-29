@@ -109,7 +109,7 @@ fn hostile_event_text_never_reaches_the_execute_value() {
         );
         // And the hostile text did travel, as its own argv element.
         assert_eq!(
-            Spy::arg_after(&args, "-title").as_deref(),
+            Spy::text_after(&args, "-title").as_deref(),
             Some(text),
             "the title itself should still be sent verbatim"
         );
@@ -133,6 +133,35 @@ fn the_execute_value_matches_the_template_exactly() {
         id.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
         "the job id is lowercase hex: {id}"
+    );
+}
+
+#[test]
+fn banner_text_goes_in_behind_one_backslash() {
+    let execute = "'/bin/x' --click 0123456789abcdef";
+    let mut post = post_with("(cd web && make) · exit 0 · 30s", "-v", execute);
+    post.subtitle = Some("[wip] api");
+    let args = post_args(&post);
+    for (flag, sent) in [
+        ("-title", "\\(cd web && make) · exit 0 · 30s"),
+        ("-message", "\\-v"),
+        ("-subtitle", "\\[wip] api"),
+    ] {
+        assert_eq!(
+            Spy::arg_after(&args, flag).as_deref(),
+            Some(sent),
+            "{flag} value"
+        );
+    }
+    assert_eq!(
+        Spy::arg_after(&args, "-execute").as_deref(),
+        Some(execute),
+        "-execute goes in as is"
+    );
+    assert_eq!(
+        Spy::arg_after(&args, "-group").as_deref(),
+        Some("herdr-nudge-w1:p1"),
+        "-group goes in as is"
     );
 }
 
@@ -202,7 +231,7 @@ fn posting_runs_the_bundled_binary_with_the_composed_argv() {
     let argv = spy.only();
     assert_eq!(argv[0], binary.display().to_string(), "program run");
     assert_eq!(
-        Spy::arg_after(&argv, "-title").as_deref(),
+        Spy::text_after(&argv, "-title").as_deref(),
         Some("Claude · blocked"),
         "title in argv"
     );

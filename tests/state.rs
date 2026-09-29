@@ -338,7 +338,7 @@ fn job(id: &JobId) -> Job {
 #[test]
 fn each_server_state_directory_comes_from_its_own_environment() {
     let runner = Replay::new([
-        Recorded::sys("pgrep-herdr-three-servers"),
+        Recorded::pgrep_herdr("pgrep-herdr-three-servers"),
         Recorded::sys("ps-env-server-xdg"),
         Recorded::sys("ps-env-server-plain"),
     ]);
@@ -410,7 +410,7 @@ fn protected_folders_ignore_case_and_refuse_dot_dot() {
 fn a_server_state_directory_in_documents_is_protected_by_either_home() {
     let runner = || {
         Replay::new([
-            Recorded::sys("pgrep-herdr-documents-servers"),
+            Recorded::pgrep_herdr("pgrep-herdr-documents-servers"),
             Recorded::sys("ps-env-server-documents"),
             Recorded::sys("ps-env-server-no-home"),
         ])

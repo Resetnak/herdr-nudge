@@ -50,7 +50,7 @@ SCRATCH = "/tmp/herdr-nudge-verify"
 # The session the sys/ captures were made under; it shows in socket paths and
 # a client's argv, so matching it keeps those lines comparable.
 SESSION = "nudge-capture"
-PGREP = ["pgrep", "-a", "-lf", "^([^ ]*/)?herdr( |$)"]
+PGREP = ["pgrep", "-a", "-lf", "^-?([^ ]*/)?herdr( |$)"]
 # The only values compared: reply and error kinds, and agent labels. The rest
 # is state that differs between any two captures. Not inside arrays: a list's
 # members are data, and agent-manifests' agents come from a remote registry

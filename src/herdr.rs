@@ -120,8 +120,10 @@ pub struct Cli<'a, R: Runner> {
 
 impl<R: Runner> Cli<'_, R> {
     /// Pane ids go in as plain arguments. `herdr` doesn't accept `--`, but
-    /// it also reads an argument starting with `-` as a pane id rather than
-    /// a flag (checked on 0.9.0), so a strange id just isn't found.
+    /// it reads an unknown argument starting with `-` as a pane id rather
+    /// than a flag (checked on 0.9.0), so a strange id just isn't found.
+    /// `-h` and `--help` are still flags, and no id Herdr gives out looks
+    /// like them.
     fn query<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Error> {
         let out = self.runner.run(self.bin, args)?;
         // Errors come on stderr with exit 1; success on stdout with exit 0.

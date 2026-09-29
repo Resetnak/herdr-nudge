@@ -144,12 +144,15 @@ fn install_prefers_the_list_just_fetched_to_the_saved_one() {
 fn install_removes_notes_left_by_killed_shells() {
     let dir = scratch_dir("shell_hook_marks");
     let state = state_with_agents(&dir);
-    let left = state.root.join("zsh-skip.4242.1790463606.5924210548");
-    fs::write(&left, "").unwrap();
+    let note = state.root.join("zsh-skip.4242.1790463606.5924210548");
+    fs::write(&note, "").unwrap();
+    let token = state.root.join("zsh-shell.4242");
+    fs::write(&token, "1790463606.5924210548\n").unwrap();
     let notes = shell_hook::install(&state, None, None, None, &Replay::new([]));
-    assert!(!left.exists(), "note still there, notes: {notes:?}");
+    assert!(!note.exists(), "note still there, notes: {notes:?}");
+    assert!(!token.exists(), "token still there, notes: {notes:?}");
     assert!(
-        notes.iter().any(|n| n.starts_with("removed 1 note")),
+        notes.iter().any(|n| n.starts_with("removed 2 note")),
         "{notes:?}"
     );
     assert!(

@@ -226,6 +226,11 @@ belong to the probe; tests should override them.
 | `sys/osascript-register-bundle` | – | `LSRegisterURL(<our bundle>, true)` through `osascript`: prints `0`, exit 0 |
 | `sys/osascript-register-missing` | – | the same for a path that doesn't exist: prints `-43`, and still exit 0 |
 
+The `pgrep-herdr-*` captures record the pattern from before it took a
+leading `-` (`-herdr`, iTerm2's custom shell). Tests replay them under
+today's pattern (`Recorded::pgrep_herdr`), and every process they list
+matches either way.
+
 The `nudge-capture` session was made for these captures and deleted
 afterwards. Its server and clients were started from a pty with only
 `HOME`, `PATH`, `TERM` and `LANG` set, plus `__CFBundleIdentifier` and

@@ -38,8 +38,8 @@ pub enum PaneKind {
     Shell,
 }
 
-/// What decided it. `doctor` prints this, so a pane classified the wrong way
-/// says why rather than leaving the user guessing.
+/// What decided it. The plugin log shows it with each banner, so a pane
+/// classified the wrong way says why rather than leaving the user guessing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassifySignal {
     /// `known_agents_extra` or `known_agents_remove` named the label, and
@@ -105,9 +105,9 @@ pub fn classify(
         // agent never gets this far: the manifests answered without asking
         // anything. What is left is a label Herdr doesn't know, which is what
         // a shell hook reports. An agent with its own integration but no
-        // manifest lands here too, and so does every agent while nothing has
-        // written the cache yet. Each reads as a shell command until the
-        // query works again.
+        // manifest lands here too, unless `AGENTS_WITHOUT_MANIFEST` names it,
+        // and so does every agent while nothing has written the cache yet.
+        // Each reads as a shell command until the query works again.
         None => decided(PaneKind::Shell, ClassifySignal::Unavailable),
     }
 }

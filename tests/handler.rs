@@ -373,7 +373,7 @@ fn with_two_terminals(test_name: &str, recording: &str, front: &str) -> Harness 
     let mut harness = Harness::new(test_name, Vec::new());
     harness.runner = Replay::new([
         pane_get,
-        Recorded::sys("pgrep-herdr-two-sessions"),
+        Recorded::pgrep_herdr("pgrep-herdr-two-sessions"),
         Recorded::sys("lsof-capture-session-clients"),
         Recorded::sys("ps-env-capture-session-clients"),
         Recorded::sys("lsappinfo-visible-process-list"),
@@ -1664,7 +1664,7 @@ fn test_posts_for_its_own_pane_though_the_user_is_watching() {
 
     let argv = harness.spy.only();
     assert_eq!(
-        Spy::arg_after(&argv, "-subtitle").as_deref(),
+        Spy::text_after(&argv, "-subtitle").as_deref(),
         Some("herdr-nudge"),
         "subtitle should be workspace-get's label"
     );
@@ -1698,7 +1698,7 @@ fn test_shell_looks_like_a_finished_command() {
     };
     assert_eq!(posted.title, "herdr-nudge · done", "test --shell title");
     assert_eq!(
-        Spy::arg_after(&harness.spy.only(), "-message").as_deref(),
+        Spy::text_after(&harness.spy.only(), "-message").as_deref(),
         Some("herdr-nudge test --shell · exit 0 · 0s"),
     );
     let Ok(Loaded::Found(job)) = harness.state.job(&posted.job_id) else {
@@ -1740,7 +1740,7 @@ fn test_without_a_workspace_label_uses_the_id() {
     let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
     assert!(matches!(report.outcome, Outcome::Posted(_)), "{report:?}");
     assert_eq!(
-        Spy::arg_after(&harness.spy.only(), "-subtitle").as_deref(),
+        Spy::text_after(&harness.spy.only(), "-subtitle").as_deref(),
         Some("w3")
     );
     assert!(
@@ -1816,7 +1816,7 @@ fn test_with_an_empty_workspace_label_uses_the_id() {
     let report = handler::test(&harness.deps(), "w3:p1", PaneKind::Agent);
     assert!(matches!(report.outcome, Outcome::Posted(_)), "{report:?}");
     assert_eq!(
-        Spy::arg_after(&harness.spy.only(), "-subtitle").as_deref(),
+        Spy::text_after(&harness.spy.only(), "-subtitle").as_deref(),
         Some("w3"),
         "workspace-get-empty-label: subtitle"
     );

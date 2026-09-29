@@ -75,6 +75,8 @@ struct Shell {
     log: PathBuf,
     /// Extra environment for zsh, or a variable to leave out.
     env: Vec<(&'static str, Option<String>)>,
+    /// A line run before the hook is sourced, as `.zshrc` would.
+    before: Option<&'static str>,
 }
 
 impl Shell {
@@ -117,6 +119,7 @@ impl Shell {
             dir,
             state,
             env: Vec::new(),
+            before: None,
         };
         shell.answer_pane_get("pane-get-unfocused");
         shell
@@ -138,6 +141,15 @@ impl Shell {
     fn env(mut self, name: &'static str, value: Option<&str>) -> Shell {
         self.env.push((name, value.map(str::to_owned)));
         self
+    }
+
+    fn before(mut self, line: &'static str) -> Shell {
+        self.before = Some(line);
+        self
+    }
+
+    fn source_line(&self) -> String {
+        format!("source {}", self.state.shell_hook_path().display())
     }
 
     /// Sources the hook and writes `lines` all at once, so each is typed
@@ -178,7 +190,10 @@ impl Shell {
         let mut child = cmd.spawn().unwrap();
         let mut stdin = child.stdin.take().unwrap();
         // Write errors are ignored: after a Kill, or an exec, nobody reads.
-        let _ = writeln!(stdin, "source {}", self.state.shell_hook_path().display());
+        if let Some(line) = self.before {
+            let _ = writeln!(stdin, "{line}");
+        }
+        let _ = writeln!(stdin, "{}", self.source_line());
         for step in steps {
             match step {
                 Line(line) => {
@@ -250,12 +265,16 @@ impl Shell {
         assert!(calls.is_empty(), "expected no herdr calls, got {calls:#?}");
     }
 
-    /// The watcher's note files are all gone once the shell has exited.
+    /// The watcher's note files and the shell's token file are all gone
+    /// once the shell has exited.
     fn assert_no_marks(&self) {
         let marks: Vec<_> = fs::read_dir(&self.state.root)
             .unwrap()
             .map(|e| e.unwrap().file_name())
-            .filter(|n| n.to_string_lossy().starts_with("zsh-skip"))
+            .filter(|n| {
+                let n = n.to_string_lossy();
+                n.starts_with("zsh-skip") || n.starts_with("zsh-shell")
+            })
             .collect();
         assert!(marks.is_empty(), "left behind: {marks:?}");
     }
@@ -434,6 +453,49 @@ fn a_command_typed_ahead_keeps_the_claim() {
 }
 
 #[test]
+fn a_slow_prompt_does_not_make_a_typed_ahead_command_release() {
+    // A precmd hook after ours, like a slow git prompt. Only whether the
+    // next line was already waiting counts, not how long the prompt took.
+    let shell = Shell::new("zsh_slow_prompt", CONFIG);
+    shell.run(&[
+        "slow() { sleep 1.2 }; precmd_functions+=(slow)",
+        "sleep 1.6",
+        "true",
+        "sleep 1.6",
+    ]);
+    let calls = shell.calls(11);
+    let released = releases(&calls);
+    assert_eq!(
+        released.len(),
+        1,
+        "only the shell exiting releases: {calls:#?}"
+    );
+}
+
+#[test]
+fn the_hook_leaves_the_users_reply_and_last_job_alone() {
+    // A long command, then one typed at the prompt, which releases: every
+    // path that starts something in the background.
+    let shell = Shell::new("zsh_user_parameters", CONFIG);
+    shell.steps(&[
+        Line("REPLY=mine; sleep 30 & job=$!"),
+        Line("sleep 1.6"),
+        WaitIdle,
+        Pause(1500),
+        Line("true"),
+        // Unquoted: `!"` would be history expansion in an interactive zsh.
+        Line("print -r -- $REPLY $job $! > kept; kill $job"),
+    ]);
+    let kept = fs::read_to_string(shell.dir.join("kept")).unwrap();
+    let words: Vec<_> = kept.split_whitespace().collect();
+    assert_eq!(words.len(), 3, "kept: {kept:?}");
+    assert_eq!(words[0], "mine", "REPLY after the hook ran: {kept:?}");
+    assert_eq!(words[1], words[2], "$! after the hook ran: {kept:?}");
+    let calls = shell.calls(6);
+    assert_eq!(releases(&calls).len(), 1, "`true` releases: {calls:#?}");
+}
+
+#[test]
 fn a_failed_long_command_is_labelled_failed() {
     let shell = Shell::new("zsh_failed", CONFIG);
     shell.run(&["sleep 1.6; false"]);
@@ -474,8 +536,59 @@ fn ignored_commands_and_agent_clis_are_not_reported() {
         "'vim' a",
         "EDITOR=/opt/x vim",
         "PATH=/opt/bin:$PATH claude",
+        "EDITOR=vim",
+        "$EDITOR",
+        "\"${EDITOR}\" a",
+        "${NOPE:-claude}",
+        "$NOPE vim",
     ]);
     shell.assert_no_calls();
+}
+
+/// `_herdr_nudge_program` on its own, in a shell with the hook loaded. The
+/// lines go through a file so zsh never parses them as commands.
+#[test]
+fn the_program_a_line_runs_is_found_as_zsh_would_run_it() {
+    let cases = [
+        ("a=1; vim notes", "vim"),
+        ("a=1 && vim notes", "vim"),
+        ("$E x", "code"),
+        ("\"$E\" x", "code"),
+        ("'$E' x", "$E"),
+        ("\\$E x", "$E"),
+        ("${E:-vim} x", "code"),
+        ("${E2:-vim} x", "vim"),
+        ("${E2-vim} x", "x"),
+        ("${UNSET-vim} x", "vim"),
+        ("$UNSET vim", "vim"),
+        ("=sleep 1", "sleep"),
+    ];
+    let shell = Shell::new("zsh_program", CONFIG);
+    let lines: String = cases.iter().map(|(line, _)| format!("{line}\n")).collect();
+    fs::write(shell.dir.join("lines"), lines).unwrap();
+    shell.run(&[
+        "E=code; E2=; unset UNSET",
+        "while IFS= read -r l; do _herdr_nudge_program $l && print -r -- $REPLY || print -; done < lines > labels",
+    ]);
+    let labels = fs::read_to_string(shell.dir.join("labels")).unwrap();
+    let labels: Vec<_> = labels.lines().collect();
+    assert_eq!(labels.len(), cases.len(), "labels: {labels:?}");
+    for ((line, want), got) in cases.iter().zip(labels) {
+        assert_eq!(got, *want, "program of {line:?}");
+    }
+}
+
+#[test]
+fn a_command_named_by_a_variable_is_labelled_by_what_it_runs() {
+    let shell = Shell::new("zsh_variable_command", CONFIG);
+    shell.run(&["nap=sleep", "$nap 1.6", "=sleep 1.6"]);
+    let calls = reports(&shell.calls(12));
+    let working: Vec<_> = calls
+        .iter()
+        .filter(|c| arg_after(c, "--state") == Some("working"))
+        .map(|c| arg_after(c, "--agent"))
+        .collect();
+    assert_eq!(working, [Some("sleep"), Some("sleep")], "{calls:#?}");
 }
 
 #[test]
@@ -493,6 +606,60 @@ fn exec_is_not_timed() {
         shell.run(lines);
         shell.assert_no_calls();
     }
+}
+
+#[test]
+fn an_exec_hidden_in_a_function_leaves_no_claim() {
+    // `omz reload` execs zsh from inside a function. The new shell has the
+    // same pid, so only its new token tells the watcher. The pause lets the
+    // new shell stay up until the watcher has looked.
+    let slow = "reload() { sleep 1.3; exec zsh -f -i }";
+    let quick = "reload() { exec zsh -f -i }";
+    for (name, define) in [
+        ("zsh_exec_after_claim", slow),
+        ("zsh_exec_before_claim", quick),
+    ] {
+        let shell = Shell::new(name, CONFIG);
+        let again = shell.source_line();
+        shell.steps(&[Line(define), Line("reload"), Line(&again), Pause(4000)]);
+        let calls = reports(&shell.calls(0));
+        if define == slow {
+            let working = find(&calls, "report-agent", ("--state", "working"));
+            let release = find(&calls, "release-agent", ("--agent", "reload"));
+            assert!(seq(working) < seq(release), "{calls:#?}");
+            assert!(
+                !calls
+                    .iter()
+                    .any(|c| arg_after(c, "--state") == Some("idle")),
+                "{name}: nothing finished the command: {calls:#?}"
+            );
+        } else {
+            assert!(calls.is_empty(), "{name}: {calls:#?}");
+        }
+        shell.assert_no_marks();
+    }
+}
+
+#[test]
+fn an_exec_typed_ahead_releases_the_claim_the_shell_still_held() {
+    // `sleep 1.6` finishes with a claim, and `reload` was typed ahead, so its
+    // preexec keeps that claim. Once the shell is replaced, nothing but the
+    // `reload` watcher knows the claim is there.
+    let shell = Shell::new("zsh_exec_after_typed_ahead", CONFIG);
+    let again = shell.source_line();
+    shell.steps(&[
+        Line("reload() { exec zsh -f -i }"),
+        Line("sleep 1.6"),
+        Line("reload"),
+        Line(&again),
+        Pause(5000),
+    ]);
+    let calls = reports(&shell.calls(0));
+    let idle = find(&calls, "report-agent", ("--state", "idle"));
+    let release = find(&calls, "release-agent", ("--agent", "sleep"));
+    assert!(seq(idle) < seq(release), "{calls:#?}");
+    assert_eq!(releases(&calls).len(), 1, "{calls:#?}");
+    shell.assert_no_marks();
 }
 
 #[test]
@@ -524,6 +691,21 @@ fn the_hook_does_nothing_outside_a_herdr_pane() {
     let shell = Shell::new("zsh_outside", CONFIG).env("HERDR_ENV", None);
     shell.run(&["sleep 1.3"]);
     shell.assert_no_calls();
+}
+
+#[test]
+fn the_hook_works_under_nounset() {
+    let outside = Shell::new("zsh_nounset_outside", CONFIG)
+        .env("HERDR_ENV", None)
+        .before("setopt nounset");
+    outside.run(&["sleep 1.3"]);
+    outside.assert_no_calls();
+
+    let inside = Shell::new("zsh_nounset_inside", CONFIG).before("setopt nounset");
+    inside.run(&["sleep 1.6"]);
+    let calls = inside.calls(6);
+    find(&calls, "report-agent", ("--state", "working"));
+    find(&calls, "report-agent", ("--state", "idle"));
 }
 
 #[test]

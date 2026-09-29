@@ -26,9 +26,11 @@ const PS: &str = "/bin/ps";
 const LSOF: &str = "/usr/sbin/lsof";
 
 /// Every process whose command line starts with `herdr`, with or without a
-/// path. `herdr-nudge` (us, and any other hook running right now) doesn't
-/// match. A `herdr` installed under a path with a space in it doesn't either.
-const HERDR_PATTERN: &str = "^([^ ]*/)?herdr( |$)";
+/// path, or with the `-` a login shell gets: iTerm2 runs a custom shell as
+/// `-herdr`. `herdr-nudge` (us, and any other hook running right now)
+/// doesn't match. A `herdr` installed under a path with a space in it
+/// doesn't either.
+pub const HERDR_PATTERN: &str = "^-?([^ ]*/)?herdr( |$)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalSource {

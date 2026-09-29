@@ -7,10 +7,11 @@
 //! point one `herdr pane get` answers two questions at once: is the user
 //! looking at this pane, and is it an agent or a shell command.
 //!
-//! Every event also reads `jobs/` once, before anything else. A job is a
-//! notification that is up, and one that no longer says what the pane is
-//! doing gets taken down: the pane changed status, closed (alone or with its
-//! tab or workspace), or the user went to it. That read costs no subprocess,
+//! Every event also reads `jobs/` once, before anything but the notifier's
+//! registration check (`ensure_registered`). A job is a notification that
+//! is up, and one that no longer says what the pane is doing gets taken
+//! down: the pane changed status, closed (alone or with its tab or
+//! workspace), or the user went to it. That read costs no subprocess,
 //! and nothing is started unless a job turns out to be stale.
 //!
 //! Herdr doesn't wait for one hook before starting the next, so two can run
@@ -203,9 +204,9 @@ fn ensure_registered<R: Runner, S: Spawner>(deps: &Deps<R, S>, notes: &mut Vec<S
 ///
 /// Every job from before `now_ms` goes. Herdr restores panes under the same
 /// ids after a restart, so a job from before it could focus a different pane
-/// than the one its banner is about. The cutoff keeps a job posted after this
-/// hook started, which a restored pane's first status event could do; one
-/// posted by a hook that started before this one is still dropped. The agent
+/// than the one its banner is about. The cutoff keeps a job that a hook
+/// running alongside this one posted after it started; one posted by a hook
+/// that started before this one is still dropped. The agent
 /// list is fetched again, since a restart is often a Herdr upgrade.
 ///
 /// `herdr_bin` is `None` when the hook's environment didn't say where

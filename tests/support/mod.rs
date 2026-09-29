@@ -237,6 +237,17 @@ impl Recorded {
         Recorded::load("sys", name)
     }
 
+    /// A `sys/pgrep-herdr-*` capture, answering the pattern the code asks
+    /// with today. They were captured before the pattern took a login
+    /// shell's leading `-`, and every process they list matches either way.
+    pub fn pgrep_herdr(name: &str) -> Recorded {
+        let mut recorded = Recorded::sys(name);
+        recorded.argv = ["pgrep", "-a", "-lf", herdr_nudge::terminal::HERDR_PATTERN]
+            .map(str::to_owned)
+            .to_vec();
+        recorded
+    }
+
     fn load(dir: &str, name: &str) -> Recorded {
         let path = fixtures_dir().join(dir).join(format!("{name}.json"));
         let json =
@@ -361,6 +372,17 @@ impl Spy {
     pub fn arg_after(argv: &[String], flag: &str) -> Option<String> {
         let at = argv.iter().position(|a| a == flag)?;
         argv.get(at + 1).cloned()
+    }
+
+    /// The banner text after `flag`, as terminal-notifier shows it: the one
+    /// leading backslash it strips comes off. `None` without the flag;
+    /// panics if the value has no leading backslash.
+    pub fn text_after(argv: &[String], flag: &str) -> Option<String> {
+        let value = Self::arg_after(argv, flag)?;
+        match value.strip_prefix('\\') {
+            Some(text) => Some(text.to_owned()),
+            None => panic!("{flag} value {value:?} has no leading backslash"),
+        }
     }
 }
 

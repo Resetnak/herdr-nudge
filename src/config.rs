@@ -307,8 +307,9 @@ pub fn example() -> String {
     let sh = &d.shell;
     format!(
         r#"# herdr-nudge settings. Every key is shown at its default, so delete
-# any you don't change. A list you set replaces the default list whole. A key this version doesn't know is an error, and
-# then the whole file is ignored until it's fixed (the plugin log says so).
+# any you don't change. A list you set replaces the default list whole.
+# A key this version doesn't know is an error, and then the whole file is
+# ignored until it's fixed (the plugin log says so).
 #
 # Most changes apply from the next notification. The zsh hook's settings
 # ([shell] enabled, min_seconds, ignore_commands and the known_agents lists)

@@ -28,11 +28,13 @@ pub const SCRIPT: &str = include_str!("../shell/herdr-nudge.zsh");
 /// one. Without it, the list saved by an earlier run is used.
 ///
 /// It also deletes the notes the hook's watcher leaves for its shell
-/// (`zsh-skip.<pid>.<start>`). The shells that wrote them went with the old
-/// server, so any still here were left by a shell killed mid-command. A
-/// second Herdr session shares this directory; a shell of that session
-/// that loses its note reports that one command's finish, as it would
-/// have before the note existed.
+/// (`zsh-skip.<pid>.<start>`) and each shell's token (`zsh-shell.<pid>`).
+/// The shells that wrote them went with the old server, so any still here
+/// were left by a shell that was killed. A second Herdr session shares this
+/// directory. A shell of that session that loses its note reports that one
+/// command's finish, as it would have before the note existed. Losing a
+/// token costs nothing: a missing file reads as no change, and a shell that
+/// replaces it by `exec` writes a new one.
 pub fn install<R: Runner>(
     state: &StateDir,
     config_dir: Option<&Path>,
@@ -119,7 +121,9 @@ fn remove_marks(state: &StateDir, notes: &mut Vec<String>) {
     };
     let mut removed = 0;
     for entry in entries.flatten() {
-        if entry.file_name().to_string_lossy().starts_with("zsh-skip.")
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with("zsh-skip.") || name.starts_with("zsh-shell."))
             && fs::remove_file(entry.path()).is_ok()
         {
             removed += 1;

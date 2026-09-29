@@ -126,8 +126,8 @@ impl Runner for System {
 }
 
 impl Spawner for System {
-    /// The child is left running with its pipes closed. It outlives us: we
-    /// exit within milliseconds and launchd takes over as its parent.
+    /// The child is left running with its pipes closed. It outlives us, and
+    /// launchd takes over as its parent when we exit.
     fn spawn(&self, program: &Path, args: &[String]) -> io::Result<()> {
         Command::new(program)
             .args(args)

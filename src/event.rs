@@ -9,10 +9,10 @@
 //! - Shell reports leave `title`, `display_agent` and `state_labels` out
 //!   rather than sending nulls.
 //!
-//! So only `pane_id`, `workspace_id` and `agent_status` are ever required
-//! (and `tab_id` on `tab.closed`), and an event type or status we don't
-//! recognise parses as `Other` rather than failing, so a Herdr update
-//! shouldn't break the plugin.
+//! So besides the event's name, only `pane_id`, `workspace_id` and
+//! `agent_status` are ever required (and `tab_id` on `tab.closed`), and an
+//! event type or status we don't recognise parses as `Other` rather than
+//! failing, so a Herdr update shouldn't break the plugin.
 //!
 //! What does still fail the parse: a payload with no `type` field, or one
 //! missing a required field. Every captured event has them, and a failure

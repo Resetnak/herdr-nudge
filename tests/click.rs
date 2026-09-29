@@ -145,7 +145,7 @@ fn a_click_raises_the_terminal_attached_now_not_the_one_posted_from() {
     job.detect_at_click = true;
     state.save_job(&job).expect("save job");
 
-    let mut pgrep = Recorded::sys("pgrep-herdr-two-sessions");
+    let mut pgrep = Recorded::pgrep_herdr("pgrep-herdr-two-sessions");
     pgrep.stdout = pgrep
         .stdout
         .lines()
@@ -191,11 +191,7 @@ fn with_no_client_left_the_click_raises_the_job_terminal() {
     job.detect_at_click = true;
     state.save_job(&job).expect("save job");
 
-    let mut none = Recorded::sys("pgrep-herdr-none");
-    none.argv = ["pgrep", "-a", "-lf", "^([^ ]*/)?herdr( |$)"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let none = Recorded::pgrep_herdr("pgrep-herdr-none");
     let runner = Replay::new([none, Recorded::sys("open-bundle-ghostty")]);
     let (outcome, notes) = click::run(&state, None, &runner, &Spy::default(), &id, 2_000);
 

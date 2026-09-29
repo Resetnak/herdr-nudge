@@ -16,7 +16,7 @@
 //! startup hook waits for the next server start. So every hook checks first,
 //! before anything can run the notifier, a `-remove` included. A marker in
 //! the state directory makes the registration itself once per install; a
-//! hook after that looks up one file date and reads one small file.
+//! hook after that looks up two file dates and reads one small file.
 //! `--cleanup` and `doctor` register every time.
 
 use std::fs;

@@ -14,8 +14,9 @@ use std::path::Path;
 
 use herdr_nudge::config::Config;
 use herdr_nudge::terminal::{
-    Client, Resolution, TerminalSource, asns, attached_clients, detect, frontmost_bundle_id,
-    is_client, is_server, parse_bundle_id, parse_lsof, parse_pgrep, parse_ps, pick, resolve,
+    Client, HERDR_PATTERN, Resolution, TerminalSource, asns, attached_clients, detect,
+    frontmost_bundle_id, is_client, is_server, parse_bundle_id, parse_lsof, parse_pgrep, parse_ps,
+    pick, resolve,
 };
 use support::{Recorded, Replay};
 
@@ -36,7 +37,7 @@ fn capture() -> &'static Path {
 /// Every process call that finding the clients of `nudge-capture` makes.
 fn capture_session() -> Vec<Recorded> {
     vec![
-        Recorded::sys("pgrep-herdr-two-sessions"),
+        Recorded::pgrep_herdr("pgrep-herdr-two-sessions"),
         Recorded::sys("lsof-capture-session-clients"),
         Recorded::sys("ps-env-capture-session-clients"),
     ]
@@ -106,7 +107,7 @@ fn only_the_clients_of_our_own_server_are_kept() {
     assert_eq!(
         *runner.calls.borrow(),
         [
-            vec!["/usr/bin/pgrep", "-a", "-lf", "^([^ ]*/)?herdr( |$)"],
+            vec!["/usr/bin/pgrep", "-a", "-lf", HERDR_PATTERN],
             vec![
                 "/usr/sbin/lsof",
                 "-b",
@@ -150,7 +151,7 @@ fn the_default_session_keeps_only_its_own_clients() {
 /// belong to another session, and then ours has none.
 #[test]
 fn a_single_client_of_another_session_is_not_ours() {
-    let mut pgrep = Recorded::sys("pgrep-herdr-two-sessions");
+    let mut pgrep = Recorded::pgrep_herdr("pgrep-herdr-two-sessions");
     pgrep.stdout = pgrep
         .stdout
         .lines()
@@ -188,11 +189,7 @@ fn a_single_client_of_another_session_is_not_ours() {
 
 #[test]
 fn no_client_at_all_is_unresolved() {
-    let runner = Replay::answering(
-        "pgrep",
-        &["-a", "-lf", "^([^ ]*/)?herdr( |$)"],
-        &Recorded::sys("pgrep-herdr-none"),
-    );
+    let runner = Replay::new([Recorded::pgrep_herdr("pgrep-herdr-none")]);
     let mut notes = Vec::new();
     let resolution = resolve(&Config::default(), &runner, capture(), &mut notes);
     assert_eq!(resolution.source, TerminalSource::Unresolved);
@@ -310,7 +307,7 @@ fn one_terminal_needs_no_ranking() {
 
 #[test]
 fn which_command_lines_are_clients() {
-    let listed = parse_pgrep(&Recorded::sys("pgrep-herdr-two-sessions").stdout);
+    let listed = parse_pgrep(&Recorded::pgrep_herdr("pgrep-herdr-two-sessions").stdout);
     let clients: Vec<u32> = listed
         .iter()
         .filter(|(_, a)| is_client(a))
@@ -322,6 +319,7 @@ fn which_command_lines_are_clients() {
         "pgrep-herdr-two-sessions"
     );
 
+    assert!(is_client(&args("-herdr")), "iTerm2's custom shell");
     assert!(is_client(&args("herdr session attach work")));
     assert!(!is_client(&args("herdr session list")));
     assert!(
@@ -336,6 +334,54 @@ fn which_command_lines_are_clients() {
     assert!(!is_client(&args("herdr --remote=mini")));
     assert!(!is_client(&args("herdr --version")), "exits at once");
     assert!(is_client(&args("herdr --session=work")));
+}
+
+/// Real `pgrep`, with `sleep` standing in under each name. Replays can't
+/// check the pattern itself, since they answer whatever it is.
+#[test]
+fn the_pgrep_pattern_finds_herdr_by_any_name_but_not_herdr_nudge() {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let names = [
+        ("herdr", true),
+        ("-herdr", true),
+        ("/opt/tools/herdr", true),
+        ("herdr-nudge", false),
+        ("-herdr-nudge", false),
+        ("/opt/tools/herdr-nudge", false),
+    ];
+    let mut children: Vec<_> = names
+        .iter()
+        .map(|(name, _)| {
+            Command::new("/bin/sleep")
+                .arg0(name)
+                .arg("30")
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let out = Command::new("/usr/bin/pgrep")
+        .args(["-a", "-lf", HERDR_PATTERN])
+        .output()
+        .unwrap();
+    for child in &mut children {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    let listed: BTreeSet<u32> = parse_pgrep(&String::from_utf8_lossy(&out.stdout))
+        .into_iter()
+        .map(|(pid, _)| pid)
+        .collect();
+    for ((name, found), child) in names.iter().zip(&children) {
+        assert_eq!(
+            listed.contains(&child.id()),
+            *found,
+            "pgrep {HERDR_PATTERN:?} on a process named {name:?}"
+        );
+    }
 }
 
 #[test]

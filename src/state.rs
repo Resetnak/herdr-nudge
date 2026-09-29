@@ -290,16 +290,6 @@ pub struct StateDir {
     pub root: PathBuf,
 }
 
-/// Where Herdr puts our state when it isn't telling us.
-///
-/// A click has no `HERDR_*` environment and its argument is only a job id, so
-/// it has to find the state directory itself. Herdr 0.9.0 uses
-/// `~/.local/state/herdr/plugins/<plugin id>` (see the captured environment
-/// in any `tests/fixtures/events/` file). `XDG_STATE_HOME` is tried first,
-/// because Herdr 0.9.1 honours it: `herdr plugin config-dir` run with it set
-/// creates `$XDG_STATE_HOME/herdr/plugins/<plugin id>`, and so does a
-/// server started with it set. A click, run with a bare environment, won't
-/// have it even when the server does; [`server_state_dirs`] covers that.
 pub const PLUGIN_ID: &str = "herdr-nudge";
 
 impl StateDir {
@@ -309,8 +299,16 @@ impl StateDir {
 
     /// `HERDR_PLUGIN_STATE_DIR` when we have it, the guessed path otherwise.
     ///
-    /// For a click the guess misses a server's `XDG_STATE_HOME`, so the
-    /// click asks the servers when the job isn't here.
+    /// A click has no `HERDR_*` environment and its argument is only a job
+    /// id, so it has to find the state directory itself. Herdr 0.9.0 uses
+    /// `~/.local/state/herdr/plugins/<plugin id>` (see the captured
+    /// environment in any `tests/fixtures/events/` file). `XDG_STATE_HOME`
+    /// is tried first, because Herdr 0.9.1 honours it: `herdr plugin
+    /// config-dir` run with it set creates
+    /// `$XDG_STATE_HOME/herdr/plugins/<plugin id>`, and so does a server
+    /// started with it set. A click, run with a bare environment, won't have
+    /// it even when the server does, so the click asks the servers
+    /// ([`server_state_dirs`]) when the job isn't here.
     pub fn locate(lookup: impl Fn(&str) -> Option<String>) -> Option<StateDir> {
         if let Some(dir) = lookup("HERDR_PLUGIN_STATE_DIR").filter(|d| !d.is_empty()) {
             return Some(StateDir::new(dir));
@@ -401,6 +399,7 @@ impl StateDir {
 /// that read from one would put up that prompt under the Herdr Nudge name.
 pub const PROTECTED_FOLDERS: [&str; 3] = ["Documents", "Downloads", "Desktop"];
 
+/// Whether `path` is in one of [`PROTECTED_FOLDERS`] under `home`.
 ///
 /// Compared without regard to case, as the Mac's disk usually is, and a
 /// path with `..` in it counts as protected rather than being worked out.

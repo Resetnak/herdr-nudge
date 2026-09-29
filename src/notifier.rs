@@ -1,14 +1,17 @@
 //! The only place that runs the bundled `terminal-notifier`.
 //!
-//! Arguments go as an argv array, so a title full of quotes or newlines is
-//! just a string. The one exception is `-execute`, which macOS hands to
-//! `/bin/sh -c` when the notification is clicked. That value is built by
+//! Arguments go as an argv array, so no shell ever sees the banner's text.
+//! terminal-notifier still reads each value as a property list, though, so
+//! the text goes in with a leading backslash (see [`post_args`]). The one
+//! value a shell does see is `-execute`, which macOS hands to `/bin/sh -c`
+//! when the notification is clicked. That value is built by
 //! [`click_command`] and can only ever be our own binary path plus a job id
 //! we generated — no event data goes near it.
 //!
-//! Nothing here waits: the notifier is started and left alone, which is why
-//! posting takes a [`Spawner`] and not a `Runner`. There is nothing to wait
-//! for: a click comes back later as a new process running `--click`.
+//! Posting doesn't wait: the notifier is started and left alone, which is
+//! why it takes a [`Spawner`] and not a `Runner`. A click comes back later
+//! as a new process running `--click`. [`dark_mode`] does wait, for
+//! `defaults`.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -114,12 +117,24 @@ pub fn click_command(binary: &Path, job: &JobId) -> Result<String, BadBinaryPath
     Ok(format!("'{path}' --click {job}"))
 }
 
+/// terminal-notifier reads its options through `NSUserDefaults`, which
+/// parses each value as a property list. A value starting with `-` is taken
+/// for the next option, one starting with `(`, `[`, `{`, `<` or a quote can
+/// come back as something other than a string, and an unreadable `-message`
+/// makes it exit 2 without posting. It strips one leading backslash from
+/// the title, subtitle and message, and a backslash can't start a property
+/// list, so the text always goes in behind one. Checked on 3.1.0 with
+/// `-list`: `\(cd web && make)` shows as `(cd web && make)`, `\\x` as `\x`.
+fn text(value: &str) -> String {
+    format!("\\{value}")
+}
+
 pub fn post_args(post: &Post) -> Vec<String> {
     let mut args = vec![
         "-title".to_owned(),
-        post.title.to_owned(),
+        text(post.title),
         "-message".to_owned(),
-        post.message.to_owned(),
+        text(post.message),
         "-group".to_owned(),
         post.group.to_owned(),
         "-execute".to_owned(),
@@ -127,7 +142,7 @@ pub fn post_args(post: &Post) -> Vec<String> {
     ];
     if let Some(subtitle) = post.subtitle {
         args.push("-subtitle".to_owned());
-        args.push(subtitle.to_owned());
+        args.push(text(subtitle));
     }
     if let Some(image) = post.content_image {
         args.push("-contentImage".to_owned());
